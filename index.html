@@ -4841,7 +4841,7 @@ body.sheet-open #banner{display:none}
 
   // カメラ：上へドラッグすると、地面すれすれから空とコアを見上げる
   const CAM_DIST = camera.aspect < 0.8 ? 28 : 20;
-  const cam = { yaw: 0, pitch: -0.18, dist: CAM_DIST, tx: 0, ty: 1.6, tz: 20 };
+  const cam = { yaw: 0, pitch: camera.aspect < 0.8 ? -0.055 : -0.1, dist: CAM_DIST, tx: 0, ty: 1.6, tz: 20 };
   function updateCamera(dt) {
     const k = 1 - Math.exp(-dt * 8);
     cam.tx += (player.x - cam.tx) * k; cam.tz += (player.z - cam.tz) * k; cam.ty += (player.y * 0.5 + 1.6 - cam.ty) * k;
