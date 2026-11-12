@@ -1,8 +1,7 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<title>ARCA — 仮想都市</title>
-<meta name="description" content="空に浮かぶ街ARCA。ポーカー、公園のニュース、Origin.のワークスペースを体験できます。">
+<meta name="description" content="空に浮かぶ街ARCA。結晶のタワー、桜のテラス、ポーカー、Origin.のワークスペースを体験できます。">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>仮想都市ARCA</title>
@@ -258,6 +257,7 @@ body.sheet-open #banner{display:none}
 </style>
 </head>
 <body>
+
 
 <div id="world" aria-label="仮想都市ARCAの3D空間"></div>
 
@@ -655,33 +655,61 @@ body.sheet-open #banner{display:none}
   { const pts = []; for (let k = 0; k < 700; k++) { const a = rand(0, TAU), h = rand(0.05, 1), r = 900; const c = Math.sqrt(1 - h * h); pts.push(Math.cos(a) * c * r, h * r, Math.sin(a) * c * r); } starGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); }
   const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: '#FFFFFF', size: 2.2, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.85 }));
   scene.add(stars);
-  const cloudTex = (() => {
-    const ct = canvasTex(256, 128, false), ctx = ct.ctx;
-    [[70, 82, 42], [122, 62, 52], [176, 78, 40], [100, 94, 36], [150, 96, 34], [206, 94, 26], [45, 98, 24]].forEach(([x, y, r]) => {
-      const g = ctx.createRadialGradient(x, y, r * 0.2, x, y, r); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.7, 'rgba(255,255,255,.9)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
-    });
-    // 雲の下側をうっすら紫にして立体感を出す
-    ctx.globalCompositeOperation = 'source-atop';
-    const sh = ctx.createLinearGradient(0, 40, 0, 128); sh.addColorStop(0, 'rgba(160,175,255,0)'); sh.addColorStop(1, 'rgba(160,175,255,.5)');
-    ctx.fillStyle = sh; ctx.fillRect(0, 0, 256, 128); ctx.globalCompositeOperation = 'source-over';
-    ct.t.needsUpdate = true; return ct.t;
-  })();
-  const cloudMat = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, depthWrite: false, opacity: 0.95 });
-  const clouds = [];
-  for (let k = 0; k < 46; k++) {
-    const low = k < 16, r = low ? rand(20, 115) : rand(125, 430), a = rand(0, TAU), w = low ? rand(30, 60) : rand(45, 120);
-    const sp = new THREE.Sprite(cloudMat); sp.scale.set(w, w * 0.5, 1);
-    const y = low ? rand(-34, -18) : rand(-45, 95);
-    sp.position.set(Math.cos(a) * r, y, Math.sin(a) * r); scene.add(sp);
-    clouds.push({ sp, a, r, y, sp2: rand(0.004, 0.012) * (Math.random() < 0.5 ? -1 : 1) });
+  // 多段ノイズで縁を崩した雲。丸いスプライトの寄せ集めから、明るい頂部と陰る下面を持つ雲塊へ。
+  // テクスチャは初期化時の3枚だけ生成。実行中にピクセル計算をしない。
+  function objCloudTexture(seed) {
+    const ct = canvasTex(512, 256, true), im = ct.ctx.createImageData(512, 256), d = im.data;
+    const hash = (x,y) => { const n=Math.sin(x*127.1+y*311.7+seed*74.7)*43758.5453; return n-Math.floor(n); };
+    const noise = (x,y) => { const ix=Math.floor(x),iy=Math.floor(y),fx=x-ix,fy=y-iy,u=fx*fx*(3-2*fx),v=fy*fy*(3-2*fy);
+      return (hash(ix,iy)*(1-u)+hash(ix+1,iy)*u)*(1-v)+(hash(ix,iy+1)*(1-u)+hash(ix+1,iy+1)*u)*v; };
+    const lobes=[[.20,.64,.17,.19],[.34,.48,.20,.29],[.52,.42,.22,.31],[.70,.56,.21,.25],[.83,.66,.14,.15]];
+    for(let y=0;y<256;y++)for(let x=0;x<512;x++){
+      const u=x/512,v=y/256;
+      let density=0;
+      lobes.forEach(([cx,cy,rx,ry],i)=>{
+        const dx=(u-cx)/(rx*(1+.08*Math.sin(seed+i))),dy=(v-cy)/ry;
+        density=Math.max(density,Math.max(0,1-dx*dx-dy*dy));
+      });
+      const n=noise(u*9,v*8)*.53+noise(u*23,v*20)*.27+noise(u*57,v*49)*.14+noise(u*111,v*97)*.06;
+      const a=clamp((density*.91+n*.36-.31)*4,0,1), shade=clamp((v-.24)*.65+(1-n)*.27+(u-.4)*.12,0,.68);
+      const i=(y*512+x)*4;
+      d[i]=255-90*shade; d[i+1]=255-63*shade; d[i+2]=255-23*shade;
+      d[i+3]=255*a*a*(3-2*a);
+    }
+    ct.ctx.putImageData(im,0,0); ct.t.needsUpdate=true; return ct.t;
   }
-  // 島の下に広がる雲海
-  for (let k = 0; k < 24; k++) {
-    const r = Math.sqrt(Math.random()) * 200, a = rand(0, TAU), w = rand(60, 110), y = rand(-42, -32);
-    const sp = new THREE.Sprite(cloudMat); sp.scale.set(w, w * 0.45, 1);
+  const cloudTex=objCloudTexture(1);
+  const cloudMat = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, depthWrite: false, opacity: 0.87 });
+  const objCloudMats=[cloudMat,...[4,9].map(seed=>new THREE.SpriteMaterial({map:objCloudTexture(seed),transparent:true,depthWrite:false,opacity:.87}))];
+  const clouds = [];
+  // 雲海・中距離の積雲・遠景の薄雲を異なる高さに置き、移動時の視差を残す。
+  for (let k = 0; k < 40; k++) {
+    const low = k < 12, r = low ? rand(35, 125) : rand(160, 440), a = rand(0, TAU), w = low ? rand(35, 65) : rand(60, 135);
+    const sp = new THREE.Sprite(objCloudMats[k%3]); sp.scale.set(w, w * rand(.38,.55), 1);
+    const y = low ? rand(-35, -22) : rand(16, 108);
     sp.position.set(Math.cos(a) * r, y, Math.sin(a) * r); scene.add(sp);
-    clouds.push({ sp, a, r, y, sp2: rand(0.002, 0.006) * (Math.random() < 0.5 ? -1 : 1) });
+    clouds.push({ sp, a, r, y, sp2: rand(.0008,.0022) });
+  }
+  for (let k = 0; k < 20; k++) {
+    const r = Math.sqrt(Math.random()) * 220, a = rand(0, TAU), w = rand(75, 130), y = rand(-45, -34);
+    const sp = new THREE.Sprite(objCloudMats[k%3]); sp.scale.set(w, w * .34, 1);
+    sp.position.set(Math.cos(a) * r, y, Math.sin(a) * r); scene.add(sp);
+    clouds.push({ sp, a, r, y, sp2: rand(.0004,.0012) });
+  }
+  // 遠い高層雲。半透明の横長い流れを空の上層に重ねる。
+  const objCirrusTex=(() => {
+    const ct=canvasTex(512,128,true),c=ct.ctx;
+    for(let k=0;k<34;k++){
+      const y=32+k*1.8, a=.025+Math.sin(k*.9)*.009;
+      const gr=c.createLinearGradient(0,0,512,0);gr.addColorStop(0,'rgba(255,255,255,0)');gr.addColorStop(.4,`rgba(255,255,255,${a})`);gr.addColorStop(1,'rgba(255,255,255,0)');
+      c.strokeStyle=gr;c.lineWidth=2.5;c.beginPath();c.moveTo(0,y+30);c.bezierCurveTo(160,y-30,310,y+30,512,y-14);c.stroke();
+    }
+    ct.t.needsUpdate=true;return ct.t;
+  })();
+  const objCirrusMat=new THREE.SpriteMaterial({map:objCirrusTex,transparent:true,depthWrite:false,fog:false,opacity:.65});
+  for(let k=0;k<7;k++){
+    const a=k/7*TAU, r=490, sp=new THREE.Sprite(objCirrusMat);sp.scale.set(230,75,1);sp.position.set(Math.cos(a)*r,150+k%3*32,Math.sin(a)*r);scene.add(sp);
+    clouds.push({sp,a,r,y:sp.position.y,sp2:.00012});
   }
   const pmrem = new THREE.PMREMGenerator(renderer);
   let envRT = null;
@@ -766,41 +794,50 @@ body.sheet-open #banner{display:none}
 
   // 縁の丸い断面（下から上の順。この順で面が外を向く）
   const areaRimProfile = r => [[r - 0.6, -1.26], [r - 0.05, -1.2], [r + 0.2, -1.08], [r + 0.34, -0.88], [r + 0.38, -0.6], [r + 0.34, -0.32], [r + 0.2, -0.12], [r - 0.05, -0.02], [r - 0.4, 0]].map(([x, y]) => new THREE.Vector2(x, y));
-  // 裏側の段（d=上面からの深さ÷k、f=半径の割合、光る輪の色）
-  const AREA_LEDGES = [[1.0, 0.84, PAL.pink], [2.9, 0.50, PAL.cyan]];
-  // 裏側の反った形の並び（D=上面からの深さ÷k、X=半径の割合。下から上の順）。サテライトも同じ並びを使う
-  const AREA_UNDER_D = [5.2, 5.2, 4.7, 3.9, 2.9, 1.9, 1.0, 0.4, 0], AREA_UNDER_X = [0, 0.19, 0.21, 0.30, 0.45, 0.62, 0.80, 0.93, 1.0];
-  // 裏側の色：縁が淡いラベンダー、芯へ向かって青紫（頂点色。テーマの色は areaUnderGradMat の color で掛ける）
-  const areaUnderTop = new THREE.Color('#DCD6FF'), areaUnderBot = new THREE.Color('#8F86E6'), areaSpireTop = new THREE.Color('#B3A9F5');
-  // 同じ半径の形は使い回す（島5つは同じ形）。動かない部品は素材ごとに1つの形にまとめてある（19回→8回）
+  // 浅い逆円錐の船体。外側の白い皿と、陰影が付く構造パネル、金属エンジンを分離。
+  const AREA_LEDGES = [[0.7, 0.84, '#A7E9EF'], [2.1, 0.50, '#D6BDFF']];
+  const AREA_UNDER_D = [3.4, 3.4, 3.15, 2.7, 2.1, 1.4, 0.7, 0.25, 0];
+  const AREA_UNDER_X = [0, 0.19, 0.21, 0.30, 0.45, 0.62, 0.80, 0.93, 1.0];
+  const areaUnderTop = new THREE.Color('#DBDDED'), areaUnderBot = new THREE.Color('#7F89AF'), areaSpireTop = new THREE.Color('#B3B8D2');
+  const areaEngineMat = new THREE.MeshPhysicalMaterial({ color: '#D1AD69', vertexColors: true, metalness: 0.65, roughness: 0.29, clearcoat: 0.25, emissive: '#573409', emissiveIntensity: 0.08 });
+  // 同じ半径のデッキは形状を共有。装甲の目地と反復リブは1メッシュにまとめる。
   const areaPlatGeos = {};
   function areaPlatGeo(r) {
     if (areaPlatGeos[r]) return areaPlatGeos[r];
-    const k = r / 17, y0 = -1.22 - 5.2 * k, tipY = y0 - 6.15 * k, D = AREA_UNDER_D, X = AREA_UNDER_X;
-    const shaftH = 16 * k, shaft = new THREE.ConeGeometry(2.6 * k, shaftH, 32, 1, true);
-    paint(shaft, (x, y) => new THREE.Color('#FFD36B').multiplyScalar(Math.pow(Math.max(0, (y + shaftH / 2) / shaftH), 1.6)));
-    // いちばん上の点は縁の下面の内側にもぐらせて、縁との間にすき間（向こうが透けて見える細い線）を作らない
+    const k = r / 17, y0 = -1.22 - 3.4 * k, tipY = y0 - 1.45 * k, D = AREA_UNDER_D, X = AREA_UNDER_X;
+    const shaftH = 2.8 * k, shaft = new THREE.CylinderGeometry(0.9 * k, 0.13 * k, shaftH, 24, 1, true);
+    paint(shaft, (x, y) => new THREE.Color('#F5CB79').multiplyScalar(Math.pow(Math.max(0, (y + shaftH / 2) / shaftH), 1.6)));
     const under = new THREE.LatheGeometry(D.map((d, i) => new THREE.Vector2(X[i] * r, -1.22 - d * k)).slice(0, -1).concat([new THREE.Vector2(r - 0.1, -1.18)]), 96);
-    paint(under, (x, y) => areaUnderTop.clone().lerp(areaUnderBot, clamp((-1.18 - y) / (5.2 * k), 0, 1)));
-    const spireH = 3.6 * k, spire = new THREE.CylinderGeometry(1.9 * k, 0.22 * k, spireH, 40);
-    paint(spire, (x, y) => areaSpireTop.clone().lerp(areaUnderBot, clamp((spireH / 2 - y) / spireH, 0, 1)));
+    paint(under, (x, y, z) => {
+      const c = areaUnderTop.clone().lerp(areaUnderBot, clamp((-1.18 - y) / (3.4 * k), 0, 1));
+      // 部材の反射差を細かく付け、発光で輪郭を描くだけの皿にしない。
+      return c.multiplyScalar(0.97 + Math.cos(Math.atan2(z, x) * 24) * 0.025);
+    });
+    const engine = new THREE.LatheGeometry([[1.05,-1.46],[1.18,-1.40],[1.32,-1.18],[1.68,-0.85],[2.2,-0.28],[2.36,-0.1],[2.36,0.05]].map(([x,y]) => new THREE.Vector2(x*k,y*k)), 48);
+    paint(engine, (x, y, z) => new THREE.Color('#FFFFFF').multiplyScalar(0.8 + 0.2 * Math.pow(Math.cos(Math.atan2(z,x) * 12), 2)));
     return (areaPlatGeos[r] = {
-      k, y0, tipY,
-      // 白い外装：丸い縁＋裏の段2つ＋下の円盤
-      rim: areaMerge([[new THREE.LatheGeometry(areaRimProfile(r), 160), null, areaY(0)]]
-        .concat(AREA_LEDGES.map(([d, f]) => [new THREE.CylinderGeometry(f * r, f * r * 0.97, 0.36 * k, 96), null, areaY(-1.22 - d * k)]))
-        .concat([[new THREE.CylinderGeometry(2.2 * k, 2.2 * k, 0.16 * k, 40), null, areaY(y0 - 3.0 * k)]])),
-      // 裏側＋尖り（頂点色のグラデーション）
-      under: areaMerge([[under, null, areaY(0)], [spire, null, areaY(y0 - 4.0 * k)]]),
-      // 光る部品：下の縁の線・段の輪・金の芯・円盤の輪・先端の玉
-      glow: areaMerge([[new THREE.TorusGeometry(r + 0.15, 0.05, 8, 192), PAL.pink, areaY(-1.12, true)]]
-        .concat(AREA_LEDGES.map(([d, f, c]) => [new THREE.TorusGeometry(f * r + 0.02, 0.07 * k, 8, 128), c, areaY(-1.22 - d * k, true)]))
-        .concat([[new THREE.CylinderGeometry(1.9 * k, 1.9 * k, 2.2 * k, 32), '#FFD36B', areaY(y0 - 1.1 * k)],
-          [new THREE.TorusGeometry(2.22 * k, 0.05 * k, 6, 48), PAL.magenta, areaY(y0 - 3.0 * k, true)],
-          [new THREE.SphereGeometry(0.45 * k, 16, 12), PAL.gold, areaY(tipY)]])),
-      band: new THREE.CylinderGeometry(r + 0.39, r + 0.39, 0.26, 192, 1, true),
-      sleeve: new THREE.CylinderGeometry(2.3 * k, 2.3 * k, 2.4 * k, 40, 1, true),
-      sleeveRings: areaMerge([0.3, 1.1, 1.9].map(d => [new THREE.TorusGeometry(2.32 * k, 0.06 * k, 6, 48), null, areaY(y0 - d * k, true)])),
+      k, y0, tipY, shaftH,
+      rim: areaMerge([[new THREE.LatheGeometry(areaRimProfile(r), 160), null, areaY(0)],
+        [new THREE.TorusGeometry(r - 0.35, 0.10, 6, 128), null, areaY(-0.10, true)],
+        [new THREE.TorusGeometry(r + 0.32, 0.075, 6, 128), null, areaY(-0.37, true)],
+        [new THREE.TorusGeometry(r + 0.30, 0.075, 6, 128), null, areaY(-0.88, true)]]
+        .concat(AREA_LEDGES.map(([d, f]) => [new THREE.TorusGeometry(f*r, 0.09*k, 6, 96), null, areaY(-1.22-d*k, true)]))),
+      under,
+      engine,
+      glow: areaMerge([[new THREE.TorusGeometry(r + 0.31, 0.035, 6, 160), PAL.cyan, areaY(-0.92, true)],
+        [new THREE.TorusGeometry(r - 0.24, 0.026, 6, 160), '#B7E9FF', areaY(-0.025, true)],
+        [new THREE.TorusGeometry(r * 0.50, 0.035*k, 6, 96), '#C1C5F1', areaY(-1.22-2.1*k, true)],
+        [new THREE.CylinderGeometry(1.04*k, 1.04*k, 0.04*k, 32), '#FFDB8A', areaY(tipY)],
+        [new THREE.TorusGeometry(1.12*k, 0.035*k, 6, 48), '#FFE7AC', areaY(tipY, true)]]),
+      band: new THREE.CylinderGeometry(r + 0.39, r + 0.39, 0.10, 160, 1, true),
+      seams: areaMerge(Array.from({ length: 24 }, (_, i) => {
+        const a = i / 24 * TAU;
+        const points = D.slice(1).map((d, j) => new THREE.Vector3(Math.cos(a) * X[j + 1] * r, -1.26 - d * k, Math.sin(a) * X[j + 1] * r)).reverse();
+        return [new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 16, 0.032 * k, 4, false), '#A0AAC7', areaY(0)];
+      })),
+      sleeve: new THREE.CylinderGeometry(2.41*k, 1.16*k, 1.36*k, 40, 1, true),
+      sleeveRings: areaMerge([[new THREE.TorusGeometry(2.4*k, 0.07*k, 6, 64), '#D8DEEC', areaY(y0, true)],
+        [new THREE.TorusGeometry(1.16*k, 0.065*k, 6, 48), '#79829F', areaY(tipY+0.04*k, true)]]),
       shaft
     });
   }
@@ -811,8 +848,8 @@ body.sheet-open #banner{display:none}
     g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.45, 'rgba(255,255,255,.35)'); g.addColorStop(1, 'rgba(255,255,255,0)');
     ct.ctx.fillStyle = g; ct.ctx.fillRect(0, 0, 8, 128); ct.t.needsUpdate = true; return ct.t;
   })();
-  const areaShaftMatL = new THREE.MeshBasicMaterial({ color: '#FFB547', map: areaShaftFade, transparent: true, opacity: 0.42, depthWrite: false, side: THREE.DoubleSide });
-  const areaTipMatL = new THREE.SpriteMaterial({ map: glowTex, color: '#FFB23A', transparent: true, opacity: 0.75, depthWrite: false });
+  const areaShaftMatL = new THREE.MeshBasicMaterial({ color: '#FFB547', map: areaShaftFade, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide });
+  const areaTipMatL = new THREE.SpriteMaterial({ map: glowTex, color: '#FFB23A', transparent: true, opacity: 0.36, depthWrite: false });
   // 柱のメッシュと、光の玉 { s: スプライト, add: 元の加算の素材, k: 大きさ, lit: ライトの素材, f: ライトの大きさの倍率 }
   const areaShafts = [], areaTips = [];
   function areaTipGlow(parent, color, s, y, lit, f) {
@@ -827,12 +864,14 @@ body.sheet-open #banner{display:none}
     const G = areaPlatGeo(r), k = G.k, add = (geo, mat, y) => { const m = new THREE.Mesh(geo, mat); m.position.y = y; parent.add(m); return m; };
     add(G.rim, areaRimMat, 0);                                       // 白く丸い縁・裏の段・下の円盤
     add(G.band, areaBandMat(opt.stops || RAINBOW, opt.segs), -0.62); // 側面の光る帯
-    add(G.under, areaUnderGradMat, 0);                               // ゆるく反ってすぼまる裏側と尖り（縁→芯で青紫に）
+    add(G.seams, areaUnderGradMat, 0);
+    add(G.under, areaUnderGradMat, 0);                               // 浅い構造シェル
+    add(G.engine, areaEngineMat, G.y0);                              // 反射と陰影のある金属製ノズル
     add(G.glow, MAT.glow, 0);                                        // 光る線・段の輪・金の芯・円盤の輪・先端
-    add(G.sleeve, MAT.glass, G.y0 - 1.1 * k);                        // 芯のまわりのガラスの筒
-    add(G.sleeveRings, MAT.white, 0);                                // 筒の白い輪3本
-    areaTipGlow(parent, '#FFC83A', 5 * k, G.tipY);
-    areaShafts.push(add(G.shaft, areaShaftMat, G.tipY - 8 * k));     // 下に伸びる光の柱（上が明るく、下へ消える）
+    add(G.sleeve, MAT.glass, G.y0 - 0.68 * k);                        // 芯のまわりのガラスの筒
+    add(G.sleeveRings, areaUnderGradMat, 0);                                // 筒の白い輪3本
+    areaTipGlow(parent, '#FFC83A', 2.2 * k, G.tipY);
+    areaShafts.push(add(G.shaft, areaShaftMat, G.tipY - G.shaftH / 2));     // 下に伸びる光の柱（上が明るく、下へ消える）
   }
   // 床：光沢のある下地（map）＋光るリングのレイヤー（emissiveMap）
   function floorDecal(parent, r, tex, glow) {
@@ -881,13 +920,13 @@ body.sheet-open #banner{display:none}
   // テーマごとの床の調子。ラウンド2の光（半球光0.4＋太陽0.7＋環境マップ L=1.0、明るい所を抑えるカーブ arcaShoulder）で撮り直して決めた。
   // ラウンド1の #9E8580（強い光の打ち消し）は今の光では灰紫にくすむ。#F2EEFF だとタイルが (223,228,239) の白になり、リングと白い縁が床に溶けた。
   // そこで床は資料の「青紫の床」寄りの淡いペリウィンクル（上から見て約 (206,213,239)）にし、白い縁・白い建物・光るリングが床から浮くようにする
-  const areaFloorTone = () => T.dark ? '#FFFFFF' : '#C2B4FF';
+  const areaFloorTone = () => T.dark ? '#FFFFFF' : '#D4D0F5';
   const areaRoadTone = () => T.dark ? '#FFFFFF' : '#E4DCFF';   // 道は床より明るく（白いクラウドロード）
   // 下地に描くリングの濃さ（ライトは色を下地で出す。明るい所はカーブで色が浅くなるので濃いめ）と、光るレイヤーの強さ（ダークで主役）
   const areaFloorBaseA = () => T.dark ? 0.25 : 0.85;
   const areaFloorEmi = () => T.dark ? 1.3 : 0.5;
   // 床の照り（clearcoat）。ライトの環境マップの地平線が青くなったので、映り込みは床を白でなく青紫に見せる側に効く
-  function areaFloorSheen(m) { m.clearcoat = 1; m.clearcoatRoughness = T.dark ? 0.05 : 0.08; m.envMapIntensity = 1; }
+  function areaFloorSheen(m) { m.clearcoat = T.dark ? 0.85 : 0.52; m.clearcoatRoughness = T.dark ? 0.08 : 0.2; m.envMapIntensity = T.dark ? 0.8 : 0.55; }
   // 床の下地：中心が白→端が淡い色、外側に青紫、3m角のタイル（面取りの線）
   function floorBase(ctx, S, R, u, ppu) {
     ppu = ppu || R / ISLAND_R;
@@ -914,13 +953,13 @@ body.sheet-open #banner{display:none}
   const areaSatGeos = {};
   function areaSatGeo(r) {
     if (areaSatGeos[r]) return areaSatGeos[r];
-    const s = r * 0.45 / 5.2, w = r * 0.95, bot = -0.7 - 5.2 * s, tipY = bot - 0.05 * r;
+    const s = r * 0.34 / 3.4, w = r * 0.95, bot = -0.7 - 3.4 * s, tipY = bot - 0.05 * r;
     const under = new THREE.LatheGeometry(AREA_UNDER_D.map((d, i) => new THREE.Vector2(AREA_UNDER_X[i] * w, -0.7 - d * s)).slice(0, -1).concat([new THREE.Vector2(w, -0.66)]), 48);
-    paint(under, (x, y) => areaUnderTop.clone().lerp(areaUnderBot, clamp((-0.7 - y) / (5.2 * s), 0, 1)));
+    paint(under, (x, y) => areaUnderTop.clone().lerp(areaUnderBot, clamp((-0.7 - y) / (3.4 * s), 0, 1)));
     return (areaSatGeos[r] = {
       tipY,
       body: areaMerge([[new THREE.CylinderGeometry(r, r * 0.96, 0.7, 48), '#F7F5FF', areaY(-0.35)], [under, null, areaY(0)]]),
-      glow: areaMerge([[new THREE.TorusGeometry(0.45 * w + 0.03, 0.05, 6, 48), PAL.pink, areaY(-0.7 - 2.9 * s, true)], [new THREE.SphereGeometry(r * 0.12, 12, 10), PAL.gold, areaY(tipY)]]),
+      glow: areaMerge([[new THREE.TorusGeometry(0.45 * w + 0.03, 0.05, 6, 48), PAL.pink, areaY(-0.7 - 2.1 * s, true)], [new THREE.CylinderGeometry(r * 0.12, r * 0.10, r * 0.08, 20), '#EBCF87', areaY(tipY)]]),
       band: new THREE.CylinderGeometry(r * 0.978 + 0.015, r * 0.978 + 0.015, 0.16, 64, 1, true)
     });
   }
@@ -929,7 +968,7 @@ body.sheet-open #banner{display:none}
     const g = new THREE.Group(); g.position.set(x, y, z); parent.add(g);
     g.add(new THREE.Mesh(G.body, areaUnderGradMat), new THREE.Mesh(G.glow, MAT.glow));
     const band = new THREE.Mesh(G.band, areaBandMat(stops || RAINBOW)); band.position.y = -0.38; g.add(band);
-    areaTipGlow(g, '#FFC83A', r * 1.2, G.tipY);
+    areaTipGlow(g, '#FFC83A', r * 0.65, G.tipY);
     spinners.push({ m: g, sp: 0, bob: true, y, ph: rand(0, TAU), amp: 1.2 });
     return { g, r };
   }
@@ -983,7 +1022,8 @@ body.sheet-open #banner{display:none}
     areaRimMat.color.set(T.dark ? '#3A3488' : '#F7F5FF'); areaUnderMat.color.set(T.dark ? '#2C2770' : '#EEE9FF');
     areaUnderGradMat.color.set(T.dark ? '#3A3488' : '#FFFFFF');   // ダークは頂点色との掛け算で #2C2770 前後
     // 光の柱と先端の光：ダークは加算、ライトは通常の重ね方の金色（白い雲の上で白い棘・白い円盤にならない）
-    areaShaftMat.opacity = 0.45;
+    areaShaftMat.opacity = 0.22;
+    areaEngineMat.envMapIntensity = T.dark ? 0.7 : 0.9;
     areaShafts.forEach(m => { m.material = T.dark ? areaShaftMat : areaShaftMatL; });
     areaTips.forEach(o => { const sc = T.dark ? o.k : o.k * o.f; o.s.material = T.dark ? o.add : o.lit; o.s.scale.set(sc, sc, 1); });
   }
@@ -1076,8 +1116,40 @@ body.sheet-open #banner{display:none}
   // ---- ゲートアーチ：ほぼ円い輪（白い帯＋内側の光る帯＋区切りのパネル線＋頂点のメダル） ----
   const areaGateR = 4.1, areaGateC = 2.3, areaGateA = 0.62, areaGateL = Math.PI + areaGateA * 2; // 輪の半径・中心の高さ・床より下にもぐる角度・弧の長さ
   // 白い帯：輪の中心を向く面（内側）を淡いラベンダーに塗り、帯の厚みが読めるようにする（外側は白）
-  const areaGateShellGeo = paint(new THREE.TorusGeometry(areaGateR, 0.34, 16, 120, areaGateL), (x, y) => new THREE.Color('#FFFFFF').lerp(new THREE.Color('#DCD3FF'), clamp((areaGateR + 0.08 - Math.hypot(x, y)) / 0.34, 0, 1)));
-  const areaGateLedGeo = paint(new THREE.TorusGeometry(areaGateR - 0.3, 0.1, 8, 120, areaGateL), (x, y) => gradAt(['#4CD3FF', '#3F6EFF', '#B06BFF', '#FF2D95', '#FF7AC6'], ((Math.atan2(y, x) + TAU) % TAU) / areaGateL));
+  // 断面が丸い管ではなく、前後の面を持つ面取り装甲。既存の足位置と開口を維持する。
+  const areaGateShellGeo = (() => {
+    const shape = new THREE.Shape(), ro = areaGateR + 0.34, ri = areaGateR - 0.34;
+    shape.moveTo(ro, 0); shape.absarc(0, 0, ro, 0, areaGateL, false);
+    shape.lineTo(Math.cos(areaGateL) * ri, Math.sin(areaGateL) * ri);
+    shape.absarc(0, 0, ri, areaGateL, 0, true); shape.closePath();
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.72, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.06, bevelSegments: 2, steps: 1, curveSegments: 56 });
+    geo.translate(0, 0, -0.36);
+    return paint(geo, (x, y, z) => new THREE.Color('#F8F9FF').lerp(new THREE.Color('#B7B9E4'), Math.abs(z) < 0.34 ? 0.7 : 0.12));
+  })();
+  const areaGateLedGeo = areaMerge([
+    [new THREE.TorusGeometry(areaGateR - 0.30, 0.048, 6, 100, areaGateL), '#76EAFF', areaAt(0, 0, 0.19)],
+    [new THREE.TorusGeometry(areaGateR - 0.44, 0.040, 6, 100, areaGateL), '#E99BFF', areaAt(0, 0, -0.19)]
+  ]);
+  const areaGatePortalGeo = (() => {
+    const s = new THREE.Shape(), r = areaGateR - 0.54;
+    const a = Math.asin((0.10 - areaGateC) / r), x = Math.sqrt(r * r - Math.pow(0.10 - areaGateC, 2));
+    s.moveTo(x, 0.10); s.absarc(0, areaGateC, r, a, Math.PI - a, false); s.closePath();
+    return new THREE.ShapeGeometry(s, 64);
+  })();
+  const areaGatePortalTex = (() => {
+    const ct = canvasTex(256, 256, true), c = ct.ctx;
+    const gr = c.createLinearGradient(0, 0, 0, 256);
+    gr.addColorStop(0, 'rgba(82,221,255,.18)'); gr.addColorStop(.58, 'rgba(167,228,255,.025)'); gr.addColorStop(1, 'rgba(117,144,255,.12)');
+    c.fillStyle = gr; c.fillRect(0, 0, 256, 256);
+    c.strokeStyle = 'rgba(166,237,255,.16)'; c.lineWidth = 1;
+    for (let y = 0; y < 256; y += 18) { c.beginPath(); c.moveTo(0, y); c.lineTo(256, y); c.stroke(); }
+    ct.t.needsUpdate = true; return ct.t;
+  })();
+  // ShapeGeometry の UV は世界座標なので、演出面の範囲を0–1へ正規化する。
+  { const uv = areaGatePortalGeo.attributes.uv, pos = areaGatePortalGeo.attributes.position;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, (pos.getX(i) + areaGateR) / (areaGateR * 2), pos.getY(i) / (areaGateC + areaGateR)); }
+  const areaGatePortalMat = new THREE.MeshBasicMaterial({ map: areaGatePortalTex, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+  const areaGatePortals = [], areaGateThresholds = [];
   // ゲートの帯の素材（areaRimMat と同じ設定＋頂点色。テーマの色も areaRimMat と同じく切り替える）と、パネル線の色（白に消えない濃さ）
   const areaGateShellMat = new THREE.MeshPhysicalMaterial({ color: '#F7F5FF', vertexColors: true, roughness: 0.18, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.1 });
   const areaGateRibMat = new THREE.MeshStandardMaterial({ color: '#B9A6FF', roughness: 0.3 });
@@ -1089,25 +1161,27 @@ body.sheet-open #banner{display:none}
     const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = Math.atan2(ux, uz); scene.add(g);
     const ring = new THREE.Group(); ring.position.y = areaGateC; ring.rotation.z = -areaGateA; g.add(ring);
     g.updateMatrixWorld(true);
-    areaGateShells.push(new THREE.Matrix4().multiplyMatrices(ring.matrixWorld, new THREE.Matrix4().makeScale(1, 1, 1.8)));   // 奥行き約1.2mの白い帯
+    areaGateShells.push(new THREE.Matrix4().multiplyMatrices(ring.matrixWorld, new THREE.Matrix4().makeScale(1, 1, 1.9)));   // 奥行き約1.6mの白い装甲帯
     areaGateLeds.push(new THREE.Matrix4().multiplyMatrices(ring.matrixWorld, new THREE.Matrix4().makeScale(1, 1, 3.6)));     // 内側の面に平たい光の帯
+    areaGatePortals.push(g.matrixWorld.clone());
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
     for (let i = 0; i < areaGateRibN; i++) {
       const th = (i + 0.5) / areaGateRibN * areaGateL;
-      m.compose(new THREE.Vector3(Math.cos(th) * areaGateR, Math.sin(th) * areaGateR, 0), q.setFromEuler(e.set(0, 0, th)), new THREE.Vector3(0.37, 1, 0.65));
+      m.compose(new THREE.Vector3(Math.cos(th) * areaGateR, Math.sin(th) * areaGateR, 0), q.setFromEuler(e.set(0, 0, th)), new THREE.Vector3(0.37, 1, 0.81));
       areaGateRibs.push(new THREE.Matrix4().multiplyMatrices(ring.matrixWorld, m));
     }
     [-1, 1].forEach(s => {
       areaGateFeet.push(new THREE.Matrix4().multiplyMatrices(g.matrixWorld, new THREE.Matrix4().makeTranslation(s * 3.39, 0.17, 0)));
       areaGateFootRings.push({ m: new THREE.Matrix4().multiplyMatrices(g.matrixWorld, new THREE.Matrix4().makeTranslation(s * 3.39, 0.35, 0)), c: Z.color });
     });
+    areaGateThresholds.push(new THREE.Matrix4().multiplyMatrices(g.matrixWorld, new THREE.Matrix4().makeTranslation(0, 0.025, 0.65)));
     // 頂点の内側にエリアのメダル
     const medal = textPlane(1.6, 1.6, 256, 256, ctx => {
       ctx.beginPath(); ctx.arc(128, 128, 120, 0, TAU); ctx.fillStyle = '#FFFFFF'; ctx.fill();
       ctx.beginPath(); ctx.arc(128, 128, 104, 0, TAU); ctx.fillStyle = Z.color; ctx.fill();
       drawEmblem(ctx, Z.emb, 128, 128, 120, ON_ZONE);
     }, true);
-    medal.position.set(0, areaGateC + areaGateR - 1.15, 0); g.add(medal);
+    medal.position.set(0, areaGateC + areaGateR - 0.10, 0.84); g.add(medal);
     // メダルの光：ダークは加算、ライトは加算だと白い塊になってメダルの絵を隠すので、ゾーン色の半透明で小さめに（drawPlaza で切り替え）
     const lit = areaGateHalo[Z.id] || (areaGateHalo[Z.id] = new THREE.SpriteMaterial({ map: glowTex, color: Z.color, transparent: true, opacity: 0.45, depthWrite: false }));
     areaTipGlow(g, Z.color, 3, medal.position.y, lit, 0.8);
@@ -1121,18 +1195,18 @@ body.sheet-open #banner{display:none}
   // 側面の光るLED（32区切りの虹。全部の道で長さが同じなので1枚を使い回す）
   const areaRoadLedTex = (() => {
     const ct = canvasTex(1024, 16, true), ctx = ct.ctx;
-    for (let k = 0; k < 32; k++) {
-      ctx.fillStyle = '#' + gradAt(RAINBOW, k / 32).getHexString(); rr(ctx, k * 32 + 2, 2, 28, 12, 4); ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.fillRect(k * 32 + 5, 7, 22, 2);
-    }
-    ct.t.wrapS = THREE.RepeatWrapping; ct.t.repeat.x = areaRoadIn / 8; ct.t.needsUpdate = true;
+    const grad = ctx.createLinearGradient(0, 0, 1024, 0);
+    ['#76DFFF', '#D3BEFF', '#FFB8DA', '#FFE3A0'].forEach((col, i) => grad.addColorStop(i / 3, col));
+    ctx.fillStyle = grad; ctx.fillRect(0, 5, 1024, 6);
+    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(0, 7, 1024, 2);
+    ct.t.needsUpdate = true;
     return ct.t;
   })();
   const areaRoadLedMat = new THREE.MeshBasicMaterial({ map: areaRoadLedTex, transparent: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
   const areaRoadGeo = {
     // 面の順は +x, -x, +y, -y, +z, -z。素材を3つ（外装・路面・裏）にまとめて描く回数を減らす
     deck: (() => { const b = new THREE.BoxGeometry(areaRoadW, 0.7, areaRoadLen); b.clearGroups(); [[0, 12, 0], [12, 6, 1], [18, 6, 2], [24, 12, 0]].forEach(([s, n, m]) => b.addGroup(s, n, m)); return b; })(),
-    post: new THREE.CylinderGeometry(0.035, 0.035, 0.85, 6),
+    post: new THREE.CylinderGeometry(0.034, 0.045, 0.87, 6),
     belly: new THREE.CylinderGeometry(areaRoadW / 2, areaRoadW / 2, areaRoadLen - 3, 32, 1, false, -Math.PI / 2, Math.PI),
     seam: new THREE.BoxGeometry(0.12, 0.05, areaRoadIn)
   };
@@ -1140,8 +1214,14 @@ body.sheet-open #banner{display:none}
   {
     const sides = f => areaMerge([-1, 1].map(s => f(s, s * (areaRoadW / 2 - 0.12))));
     areaRoadGeo.curb = sides((s, x) => [new THREE.BoxGeometry(0.24, 0.28, areaRoadIn), null, areaAt(x, 0.49, 0)]);
-    areaRoadGeo.glass = sides((s, x) => [new THREE.PlaneGeometry(areaRoadIn, 0.85), null, areaAt(x, 1.055, 0, 0, Math.PI / 2)]);
-    areaRoadGeo.rail = sides((s, x) => [paint(new THREE.CylinderGeometry(0.055, 0.055, areaRoadIn, 8, 24), (px, py) => gradAt(RAINBOW, (py + areaRoadIn / 2) / areaRoadIn * 0.83)), null, areaAt(x, 1.5, 0, Math.PI / 2)]);
+    areaRoadGeo.glass = sides((s, x) => [new THREE.PlaneGeometry(areaRoadIn, 0.83, 24, 1), null, areaAt(x, 1.04, 0, 0, Math.PI / 2)]);
+    { const p = areaRoadGeo.glass.attributes.position;
+      for (let i = 0; i < p.count; i++) p.setX(i, p.getX(i) + Math.sign(p.getX(i)) * Math.sin((p.getZ(i) / areaRoadIn + 0.5) * Math.PI) * 0.12);
+      areaRoadGeo.glass.computeVertexNormals(); areaRoadGeo.glass.computeBoundingSphere(); }
+    areaRoadGeo.rail = sides((s, x) => {
+      const pts = Array.from({ length: 17 }, (_, i) => { const t = i / 16; return new THREE.Vector3(x + s * Math.sin(t * Math.PI) * 0.12, 1.46, (t - 0.5) * areaRoadIn); });
+      return [new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 48, 0.045, 6, false), '#C5D8EC', areaY(0)];
+    });
     areaRoadGeo.led = sides(s => [new THREE.PlaneGeometry(areaRoadIn, 0.2), null, areaAt(s * (areaRoadW / 2 + 0.012), -0.05, 0, 0, s * Math.PI / 2)]);
   }
   const areaRoadPostN = Math.floor(areaRoadIn / 3) + 1;
@@ -1158,12 +1238,14 @@ body.sheet-open #banner{display:none}
     // 島の方向を指す矢印（canvas の下向きの V）
     ctx.strokeStyle = hexA(z.color, T.dark ? 0.45 : 0.6); ctx.lineWidth = 9; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (let y = 256; y < H; y += 512) [0.27, 0.73].forEach(f => { const x = W * f; ctx.beginPath(); ctx.moveTo(x - 22, y - 14); ctx.lineTo(x, y + 14); ctx.lineTo(x + 22, y - 14); ctx.stroke(); });
-    // 両端の虹の点（縁石の内側）
-    for (let y = 16; y < H; y += 32) { ctx.fillStyle = '#' + gradAt(RAINBOW, y / H).getHexString(); [19, W - 19].forEach(x => { ctx.beginPath(); ctx.arc(x, y, 5, 0, TAU); ctx.fill(); }); }
+    // パネルの目地と両端1本の誘導ライン。色の粒を並べず、長い空中回廊に見せる。
+    ctx.strokeStyle = T.dark ? 'rgba(178,189,255,.26)' : 'rgba(106,129,182,.22)'; ctx.lineWidth = 1.5;
+    for (let y = 0; y < H; y += 128) { ctx.beginPath(); ctx.moveTo(27, y); ctx.lineTo(W - 27, y); ctx.stroke(); }
+    ctx.fillStyle = T.dark ? '#93E9FF' : '#C9F4FF'; [19, W - 21].forEach(x => ctx.fillRect(x, 0, 2, H));
     z.roadTex.t.needsUpdate = true; z.roadDeck.color.set(areaRoadTone());
   }
   // 島の縁のガラスの手すり（入り口の ±0.22rad は空ける）と、上端の光る線
-  const areaRailGlassGeo = new THREE.CylinderGeometry(16.95, 16.95, 0.9, 128, 1, true, 0.22, TAU - 0.44);
+  const areaRailGlassGeo = new THREE.CylinderGeometry(16.95, 16.95, 1.02, 128, 1, true, 0.22, TAU - 0.44);
   const areaRailTopGeo = (() => {
     const a0 = Math.PI / 2 + 0.22, geo = new THREE.TorusGeometry(16.97, 0.045, 6, 192, TAU - 0.44);
     geo.rotateX(Math.PI / 2); geo.rotateY(-a0);   // 弧の始まりを入り口の右へ（+z を中心に空く）
@@ -1177,8 +1259,8 @@ body.sheet-open #banner{display:none}
     z.glow = canvasTex(512, 512, true);               // 光るレイヤー（下地の半分の解像度）
     z.areaFloor = floorDecal(g, ISLAND_R, z.tex.t, z.glow.t);
     // 縁のガラスの手すり
-    const rg = new THREE.Mesh(areaRailGlassGeo, areaRoadGlass); rg.position.y = 0.45; g.add(rg);
-    const rt = new THREE.Mesh(areaRailTopGeo, MAT.glow); rt.position.y = 0.92; g.add(rt);
+    const rg = new THREE.Mesh(areaRailGlassGeo, areaRoadGlass); rg.position.y = 0.53; g.add(rg);
+    const rt = new THREE.Mesh(areaRailTopGeo, MAT.glow); rt.position.y = 1.06; g.add(rt);
     // 島のまわりの小さな浮島（+z から測った角度 φ。奥の2つは島より高く）
     z.sats = [[1.35, -2.6, 2.8, 19.8], [-1.35, -2.6, 2.8, 19.8], [2.25, 2.4, 3.2, 20.8], [-2.25, 2.4, 3.2, 20.8]]
       .map(([f, y, r, d]) => areaSat(g, Math.sin(f) * d, y, Math.cos(f) * d, r, z.areaStops));
@@ -1194,13 +1276,17 @@ body.sheet-open #banner{display:none}
     const posts = new THREE.InstancedMesh(areaRoadGeo.post, areaRimMat, areaRoadPostN * 2); posts.frustumCulled = false;
     [-1, 1].forEach((s, si) => {
       const x = s * (RW / 2 - 0.12);
-      for (let k = 0; k < areaRoadPostN; k++) posts.setMatrixAt(si * areaRoadPostN + k, new THREE.Matrix4().makeTranslation(x, 1.055, -(areaRoadPostN - 1) * 1.5 + k * 3));
+      for (let k = 0; k < areaRoadPostN; k++) {
+        const pz = -(areaRoadPostN - 1) * 1.5 + k * 3, bow = Math.sin((pz / areaRoadIn + 0.5) * Math.PI) * 0.12;
+        posts.setMatrixAt(si * areaRoadPostN + k, new THREE.Matrix4().makeTranslation(x + s * bow, 1.04, pz));
+      }
     });
     bridge.add(posts, new THREE.Mesh(areaRoadGeo.curb, areaRimMat), new THREE.Mesh(areaRoadGeo.glass, areaRoadGlass),
-      new THREE.Mesh(areaRoadGeo.rail, MAT.glow), new THREE.Mesh(areaRoadGeo.led, areaRoadLedMat));
+      new THREE.Mesh(areaRoadGeo.rail, areaUnderGradMat), new THREE.Mesh(areaRoadGeo.led, areaRoadLedMat));
     // 丸い「腹」と、いちばん下の光る線
     const belly = new THREE.Mesh(areaRoadGeo.belly, areaUnderMat); belly.rotation.x = Math.PI / 2; belly.scale.z = 0.32; belly.position.y = -0.35; bridge.add(belly);
-    const seam = new THREE.Mesh(areaRoadGeo.seam, em(z.color)); seam.position.y = -1.28; bridge.add(seam);
+    // 腹の細い構造リブ。光る線は側面に一本だけ残す。
+    const seam = new THREE.Mesh(areaRoadGeo.seam, areaUnderMat); seam.position.y = -1.28; bridge.add(seam);
 
     gate(z.ux * (PLAZA_R - 2.5), z.uz * (PLAZA_R - 2.5), z.ux, z.uz, z);
     const gi = toWorld(z.i, 0, 14); gate(gi.x, gi.z, z.ux, z.uz, z);
@@ -1233,7 +1319,11 @@ body.sheet-open #banner{display:none}
     areaGateShells.forEach((m, i) => shells.setMatrixAt(i, m));
     const leds = new THREE.InstancedMesh(areaGateLedGeo, MAT.glow, areaGateLeds.length);
     areaGateLeds.forEach((m, i) => leds.setMatrixAt(i, m));
-    [shells, leds].forEach(im => { im.frustumCulled = false; scene.add(im); });
+    const portals = new THREE.InstancedMesh(areaGatePortalGeo, areaGatePortalMat, areaGatePortals.length);
+    areaGatePortals.forEach((m, i) => portals.setMatrixAt(i, m));
+    const thresholds = new THREE.InstancedMesh(new THREE.BoxGeometry(5.6, 0.025, 0.045), em('#A8EAFF'), areaGateThresholds.length);
+    areaGateThresholds.forEach((m, i) => thresholds.setMatrixAt(i, m));
+    [shells, leds, portals, thresholds].forEach(im => { im.frustumCulled = false; scene.add(im); });
     const ribs = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 0.08, 20), areaGateRibMat, areaGateRibs.length);
     areaGateRibs.forEach((m, i) => ribs.setMatrixAt(i, m));
     const feet = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.5, 0.58, 0.35, 24), areaRimMat, areaGateFeet.length);
@@ -1434,24 +1524,84 @@ body.sheet-open #banner{display:none}
   areaBldThemeFns.push(() => { areaGradMat.color.set(T.dark ? '#E4E0FF' : '#FFFFFF'); });
 
   // ---- 公園の木（桜と緑の木）：幹・枝・花房・散った花びらを InstancedMesh にまとめる ----
-  const areaParkPuffGeo = new THREE.IcosahedronGeometry(1, 2);
-  const areaParkPinkMat = new THREE.MeshStandardMaterial({ color: '#FFFFFF', roughness: 0.85, metalness: 0, emissive: '#FF9CCB', emissiveIntensity: 0.16, envMapIntensity: 0.35 });
-  const areaParkGreenMat = new THREE.MeshStandardMaterial({ color: '#FFFFFF', roughness: 0.85, metalness: 0, emissive: '#7BCB5A', emissiveIntensity: 0.12, envMapIntensity: 0.35 });
-  const areaParkBarkMat = cm('#8E6F68');
-  const areaParkTrunkGeo = new THREE.CylinderGeometry(0.2, 0.34, 2.6, 10);
-  const areaParkBranchGeo = new THREE.CylinderGeometry(0.07, 0.13, 1.5, 6);
+  // 葉は先細りの折れた面、桜は五弁の花。球体を使わず、空が抜ける不均一な樹冠を作る。
+  function areaCanopyUnit(blossom) {
+    const points = blossom ? [0, 0.035, 0] : [0, 0.07, 0], indices = [];
+    const N = blossom ? 20 : 8;
+    for (let k = 0; k < N; k++) {
+      const a = k / N * TAU;
+      if (blossom) {
+        const r = k % 4 === 0 ? 0.075 : (k % 4 === 2 ? 0.15 : 0.13);
+        points.push(Math.cos(a) * r, k % 4 === 2 ? 0.035 : 0, Math.sin(a) * r);
+      } else {
+        const r = Math.pow(Math.abs(Math.sin(a)), 0.65);
+        points.push(Math.cos(a) * 0.34, Math.sin(a) * 0.025, Math.sin(a) * 0.13 * r);
+      }
+      indices.push(0, 1 + k, 1 + (k + 1) % N);
+    }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(points, 3)); geo.setIndex(indices); geo.computeVertexNormals(); return geo;
+  }
+  function areaCanopyCluster(blossom) {
+    const bud = areaCanopyUnit(blossom), pieces = [], n = blossom ? 104 : 112;
+    for (let k = 0; k < n; k++) {
+      const a = k * 2.399963, h = 1 - 2 * (k + 0.5) / n, r = Math.sqrt(1 - h * h) * (0.73 + 0.22 * Math.sin(k * 3.1));
+      const m = new THREE.Matrix4().compose(new THREE.Vector3(Math.cos(a) * r, h * 0.65, Math.sin(a) * r),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.sin(k * 1.7) * 0.95, a, Math.cos(k * 2.3) * 0.8)),
+        new THREE.Vector3().setScalar((0.7 + (k % 7) * 0.085) * (blossom ? 1 : 0.72)));
+      pieces.push([bud, m, blossom ? ['#FFEAF4', '#FFF8FC', '#EDB3D3'][k % 3] : ['#D8EBCB', '#ADCBA4', '#FFFFFF'][k % 3]]);
+    }
+    const geo = areaBldMerge(pieces, true); bud.dispose(); return geo;
+  }
+  const areaParkPuffGeo = areaCanopyCluster(true), areaParkFoliageGeo = areaCanopyCluster(false);
+  const areaParkPinkMat = new THREE.MeshStandardMaterial({ vertexColors: true, color: '#FFFFFF', side: THREE.DoubleSide, roughness: 0.85, metalness: 0, emissive: '#FF9CCB', emissiveIntensity: 0.16, envMapIntensity: 0.35 });
+  const areaParkGreenMat = new THREE.MeshStandardMaterial({ vertexColors: true, color: '#FFFFFF', side: THREE.DoubleSide, roughness: 0.85, metalness: 0, emissive: '#7BCB5A', emissiveIntensity: 0.12, envMapIntensity: 0.35 });
+  const areaLeafTime = { value: 0 }, areaLeafMotion = { value: 1 };
+  [areaParkPinkMat, areaParkGreenMat].forEach(mat => {
+    mat.onBeforeCompile = shader => {
+      shader.uniforms.areaLeafTime = areaLeafTime; shader.uniforms.areaLeafMotion = areaLeafMotion;
+      shader.vertexShader = 'uniform float areaLeafTime;\nuniform float areaLeafMotion;\n' + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+        float areaLeafPhase = position.x * 3.1 + position.z * 2.2;
+        #ifdef USE_INSTANCING
+          areaLeafPhase += instanceMatrix[3].x * 0.7 + instanceMatrix[3].z * 0.4;
+        #endif
+        transformed.x += sin(areaLeafTime * 0.8 + areaLeafPhase) * 0.025 * areaLeafMotion;
+        transformed.y += sin(areaLeafTime * 1.3 + areaLeafPhase * 1.7) * 0.012 * areaLeafMotion;`);
+    };
+    mat.customProgramCacheKey = () => 'arca-leaf-wind-v1';
+  });
+  const areaParkBarkMat = cm('#715B5B', 0, { roughness: 0.95, map: (() => {
+    const ct = canvasTex(64, 256, false), c = ct.ctx; c.fillStyle = '#D6C3BA'; c.fillRect(0, 0, 64, 256);
+    for (let k = 0; k < 36; k++) { c.strokeStyle = k % 3 ? '#AC928C' : '#F0DFD3'; c.lineWidth = k % 4 ? 1 : 2;
+      c.beginPath(); c.moveTo((k * 23) % 64, 0); c.bezierCurveTo((k * 23) % 64 + 4, 80, (k * 23) % 64 - 4, 180, (k * 23) % 64, 256); c.stroke(); }
+    ct.t.wrapS = ct.t.wrapT = THREE.RepeatWrapping; ct.t.needsUpdate = true; return ct.t;
+  })() });
+  const areaParkTrunkGeo = (() => {
+    const trunk = new THREE.CylinderGeometry(0.16, 0.4, 2.6, 10, 5), p = trunk.attributes.position;
+    for (let k = 0; k < p.count; k++) { const h = (p.getY(k) + 1.3) / 2.6; p.setX(k, p.getX(k) + Math.sin(h * 2.6) * 0.12); p.setZ(k, p.getZ(k) + h * h * 0.14); }
+    trunk.computeVertexNormals(); return trunk;
+  })();
+  const areaParkBranchGeo = new THREE.CylinderGeometry(0.045, 0.12, 1.5, 6);
   const areaParkPetalGeo = new THREE.CircleGeometry(2.3, 32);
-  const areaParkPetalMat = new THREE.MeshBasicMaterial({ color: '#FFC7E4', transparent: true, opacity: 0.5, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+  const areaParkPetalMat = new THREE.MeshBasicMaterial({ map: (() => {
+    const ct = canvasTex(128, 128, false), c = ct.ctx;
+    for (let k = 0; k < 95; k++) {
+      const a = k * 2.399963, r = Math.sqrt((k + 0.5) / 95) * 60;
+      c.fillStyle = ['#FFDCEC', '#F9B6D7', '#FFF5FA'][k % 3]; c.beginPath();
+      c.ellipse(64 + Math.cos(a) * r, 64 + Math.sin(a) * r, 1.9, 1.2, a, 0, TAU); c.fill();
+    }
+    ct.t.needsUpdate = true; return ct.t;
+  })(), transparent: true, opacity: 0.75, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
   const AREA_PUFFS = [[0, 3.6, 0, 1.55], [1.35, 3.25, 0.4, 1.15], [-1.3, 3.3, -0.3, 1.2], [0.4, 3.2, -1.3, 1.1], [-0.5, 3.15, 1.25, 1.05], [0.6, 4.45, 0.3, 1.0], [-0.6, 4.3, -0.5, 0.95]];
-  const AREA_PARK_PINKS = ['#FFA9D6', '#FF8EC8', '#FFC2E3', '#FF7DBE'], AREA_PARK_GREENS = ['#8FD46F', '#A9E486', '#74C25B'];
+  const AREA_PARK_PINKS = ['#FFB9DC', '#F692C5', '#FFD6EB', '#E87EB6'], AREA_PARK_GREENS = ['#73B55D', '#A6D576', '#559B58'];
   areaBldThemeFns.push(() => { areaParkPinkMat.emissiveIntensity = T.dark ? 0.3 : 0.1; areaParkGreenMat.emissiveIntensity = T.dark ? 0.22 : 0.08; });   // ライトは光を下げた後の値
   // trees: [{ x, y, z, ry, s, green }]（parent の中の座標。根元が y）
   function areaParkGrove(parent, trees) {
     const n = trees.length, nPink = trees.filter(t => !t.green).length, nGreen = n - nPink;
     const trunks = new THREE.InstancedMesh(areaParkTrunkGeo, areaParkBarkMat, n);
-    const branches = new THREE.InstancedMesh(areaParkBranchGeo, areaParkBarkMat, n * 3);
+    const branches = new THREE.InstancedMesh(areaParkBranchGeo, areaParkBarkMat, n * 9);
     const pinks = nPink ? new THREE.InstancedMesh(areaParkPuffGeo, areaParkPinkMat, nPink * AREA_PUFFS.length) : null;
-    const greens = nGreen ? new THREE.InstancedMesh(areaParkPuffGeo, areaParkGreenMat, nGreen * AREA_PUFFS.length) : null;
+    const greens = nGreen ? new THREE.InstancedMesh(areaParkFoliageGeo, areaParkGreenMat, nGreen * AREA_PUFFS.length) : null;
     const petals = nPink ? new THREE.InstancedMesh(areaParkPetalGeo, areaParkPetalMat, nPink) : null;
     const root = new THREE.Object3D(), part = new THREE.Object3D(); root.add(part);
     const up = new THREE.Vector3(0, 1, 0), dir = new THREE.Vector3(), col = new THREE.Color(), flat = new THREE.Euler(-Math.PI / 2, 0, 0);
@@ -1466,11 +1616,18 @@ body.sheet-open #banner{display:none}
         const a = Math.atan2(bz, bx);
         dir.set(Math.cos(a) * Math.sin(tilt), Math.cos(tilt), Math.sin(a) * Math.sin(tilt));
         part.position.set(dir.x * 0.75, 2.3 + dir.y * 0.75, dir.z * 0.75); part.quaternion.setFromUnitVectors(up, dir);
-        place(branches, k * 3 + j);
+        part.scale.set(1, 1, 1); place(branches, k * 9 + j * 3);
+        // 二又の細枝を花房の内側まで伸ばす。樹冠の隙間から見える骨格。
+        [-1, 1].forEach((side, q) => {
+          const forkA = a + side * 0.42;
+          dir.set(Math.cos(forkA) * 0.82, 0.57, Math.sin(forkA) * 0.82).normalize();
+          part.position.set(Math.cos(a) * 0.85 + dir.x * 0.44, 3.05 + dir.y * 0.44, Math.sin(a) * 0.85 + dir.z * 0.44);
+          part.quaternion.setFromUnitVectors(up, dir); part.scale.set(0.48, 0.72, 0.48); place(branches, k * 9 + j * 3 + q + 1);
+        });
       });
       // 花房7つ（横に広い傘の形になるよう、縦を少しつぶす）
       AREA_PUFFS.forEach(([px, py, pz, r]) => {
-        part.position.set(px, py, pz); part.quaternion.identity(); part.scale.set(r, r * 0.84, r);
+        part.position.set(px + Math.sin(k * 3.7 + py) * 0.15, py, pz); part.quaternion.setFromEuler(new THREE.Euler(0.08 * Math.sin(py), py + k * 1.7, 0.12 * Math.cos(px))); part.scale.set(r, r * 0.84, r);
         if (t.green) { place(greens, ig); greens.setColorAt(ig++, col.set(pick(AREA_PARK_GREENS))); }
         else { place(pinks, ip); pinks.setColorAt(ip++, col.set(pick(AREA_PARK_PINKS))); }
       });
@@ -1485,8 +1642,13 @@ body.sheet-open #banner{display:none}
   }
   // 花の茂み：緑の円＋低い葉の山＋小さな花。歩いて通り抜けられる地面の飾り
   const areaParkBedGeo = new THREE.CircleGeometry(1.3, 24);
-  const areaParkLeafGeo = new THREE.SphereGeometry(1, 12, 6, 0, TAU, 0, Math.PI / 2);
-  const areaParkFlowerGeo = new THREE.SphereGeometry(0.13, 8, 6);
+  const areaParkLeafGeo = areaParkFoliageGeo;
+  const areaParkFlowerGeo = (() => {
+    const petal = new THREE.SphereGeometry(0.075, 5, 3), pieces = [];
+    for (let k = 0; k < 5; k++) { const a = k / 5 * TAU;
+      const m = new THREE.Matrix4().makeScale(1, 0.45, 1); m.setPosition(Math.cos(a) * 0.075, 0, Math.sin(a) * 0.075); pieces.push([petal, m]); }
+    const geo = areaBldMerge(pieces, false); petal.dispose(); return geo;
+  })();
   const areaParkFlowerMat = new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0, emissive: '#FFFFFF', emissiveIntensity: 0.1 });
   function areaParkBushes(parent, list) {
     const n = list.length, NL = 5, NF = 16, FC = [PAL.pink, PAL.yellow, '#FFFFFF', '#C9B2FF', '#FF9ACB'];
@@ -1508,6 +1670,68 @@ body.sheet-open #banner{display:none}
       }
     });
     [bed, leaves, flowers].forEach(im => { im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; im.frustumCulled = false; parent.add(im); });
+  }
+
+  // 接地影は全て共通の柔らかいテクスチャ。親グループ単位でまとめて描画する。
+  const areaContactShadowGeo = new THREE.PlaneGeometry(2, 2);
+  const areaContactShadowMat = new THREE.MeshBasicMaterial({ color: '#26344F', transparent: true, depthWrite: false, opacity: 0.78,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, map: (() => {
+      const ct = canvasTex(64, 64, false), c = ct.ctx, gr = c.createRadialGradient(32, 32, 2, 32, 32, 31);
+      gr.addColorStop(0, 'rgba(255,255,255,.7)'); gr.addColorStop(0.35, 'rgba(255,255,255,.5)');
+      gr.addColorStop(0.65, 'rgba(255,255,255,.22)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+      c.fillStyle = gr; c.fillRect(0, 0, 64, 64); ct.t.needsUpdate = true; return ct.t;
+    })() });
+  const areaContactShadowBatches = new WeakMap();
+  function areaContactShadow(parent, x, z, rx, rz, y, yaw) {
+    let im = areaContactShadowBatches.get(parent);
+    if (!im || im.count >= 32) {
+      im = new THREE.InstancedMesh(areaContactShadowGeo, areaContactShadowMat, 32); im.count = 0; im.frustumCulled = false;
+      parent.add(im); areaContactShadowBatches.set(parent, im);
+    }
+    const d = new THREE.Object3D(); d.position.set(x, y == null ? 0.035 : y, z); d.rotation.set(-Math.PI / 2, 0, yaw || 0); d.scale.set(rx, rz, 1); d.updateMatrix();
+    im.setMatrixAt(im.count++, d.matrix); im.instanceMatrix.needsUpdate = true;
+  }
+  areaBldThemeFns.push(() => { areaContactShadowMat.opacity = T.dark ? 0.3 : 0.78; });
+
+  // 交流テラスの建築語彙：白い植木鉢、低い円弧ベンチ、細い金属の継ぎ目。
+  function areaGardenArc(inner, outer, a, span, h) {
+    const shape = new THREE.Shape();
+    shape.absarc(0, 0, outer, a, a + span, false);
+    shape.absarc(0, 0, inner, a + span, a, true); shape.closePath();
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: h, bevelEnabled: true, bevelThickness: 0.025, bevelSize: 0.035, bevelSegments: 2, curveSegments: 24 });
+    geo.rotateX(-Math.PI / 2); return geo;
+  }
+  function areaGardenPlanter(parent, x, z, r, y) {
+    const g = new THREE.Group(); g.position.set(x, y || 0, z); parent.add(g);
+    areaContactShadow(parent, x + r * 0.1, z + r * 0.07, r * 1.4, r * 1.26, (y || 0) + 0.035);
+    const wall = cyl(r, r * 0.86, 0.43, areaBldShell, 40); wall.position.y = 0.225;
+    const soil = cyl(r * 0.91, r * 0.91, 0.035, cm('#709875'), 40); soil.position.y = 0.445;
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(r * 0.97, 0.065, 6, 48), areaBldShell); rim.rotation.x = Math.PI / 2; rim.position.y = 0.46;
+    const trim = new THREE.Mesh(new THREE.TorusGeometry(r * 0.9, 0.022, 5, 48), gm('#B7A2D5')); trim.rotation.x = Math.PI / 2; trim.position.y = 0.065;
+    g.add(wall, soil, rim, trim);
+    // 土と幹の接点にも小さな濃い影を置き、幹が鉢から浮いて見えるのを防ぐ。
+    areaContactShadow(parent, x, z, r * 0.57, r * 0.57, (y || 0) + 0.468);
+    const bed = new THREE.Group(); bed.position.y = 0.43; bed.scale.setScalar(r * 0.72); g.add(bed); areaParkBushes(bed, [[0, 0]]);
+    return g;
+  }
+  function areaGardenTerrace(parent, x, z) {
+    const g = new THREE.Group(); g.position.set(x, 0, z); parent.add(g);
+    areaContactShadow(parent, x + 0.12, z + 0.1, 4.15, 4.02);
+    const floor = cyl(3.75, 3.8, 0.08, areaBldShell, 64); floor.position.y = 0.02; g.add(floor);
+    const inlay = new THREE.Mesh(new THREE.TorusGeometry(3.5, 0.022, 5, 96), gm('#AB97D2')); inlay.rotation.x = Math.PI / 2; inlay.position.y = 0.067; g.add(inlay);
+    areaGardenPlanter(g, 0, 0, 1.38, 0.06);
+    const white = [], seats = [], feet = [];
+    for (let k = 0; k < 3; k++) {
+      const a = k * TAU / 3 + 0.16, span = TAU / 3 - 0.48;
+      white.push([areaGardenArc(2.07, 2.65, a, span, 0.16), areaBldAt(null, 0, 0.25, 0)]);
+      seats.push([areaGardenArc(2.11, 2.61, a, span, 0.055), areaBldAt(null, 0, 0.42, 0)]);
+      [a + 0.2, a + span - 0.2].forEach(f => feet.push([new THREE.BoxGeometry(0.16, 0.28, 0.42), areaBldAt(null, Math.cos(f) * 2.35, 0.16, -Math.sin(f) * 2.35, 0, f, 0)]));
+      for (let j = 0; j < 4; j++) { const f = a + span * (j + 0.5) / 4;
+        areaContactShadow(g, Math.cos(f) * 2.35, -Math.sin(f) * 2.35, 0.58, 0.5, 0.078, f); }
+    }
+    areaBldMergeMesh(g, white.concat(feet), areaBldShell, false);
+    areaBldMergeMesh(g, seats, cm('#B7B5D9', 0.08, { roughness: 0.55 }), false);
+    return g;
   }
 
   // ---- オフィス通り：白い曲面のオフィス群＋ガラス＋Origin. 本社 ----
@@ -1798,6 +2022,17 @@ body.sheet-open #banner{display:none}
       top.rotation.x = -Math.PI / 2; top.position.set(0, y + 0.3 + 0.006, -3);
       s.add(tier, led, foot, top);
     });
+    // ステージの段の下：陰のある凹み、放射状の支持リブ、通気パネルで厚みを見せる。
+    const areaStageRecess = cm('#777DAB', 0, { roughness: 0.72 }), areaStageRibs = [], areaStagePorts = [];
+    const recess = new THREE.Mesh(new THREE.CylinderGeometry(6.48, 6.48, 0.15, 64, 1, true, -Math.PI / 2, Math.PI), areaStageRecess);
+    recess.position.set(0, 0.12, -3); s.add(recess);
+    for (let j = 0; j < 21; j++) {
+      const a = -Math.PI / 2 + (j + 0.5) / 21 * Math.PI, x = Math.sin(a), zz = Math.cos(a);
+      areaStageRibs.push([new THREE.BoxGeometry(0.075, 0.22, 0.18), areaBldAt(null, x * 6.47, 0.14, -3 + zz * 6.47, 0, a, 0)]);
+      if (j % 3 === 0) areaStagePorts.push([new THREE.BoxGeometry(0.27, 0.035, 0.035), areaBldAt(null, x * 6.57, 0.14, -3 + zz * 6.57, 0, a, 0)]);
+    }
+    areaBldMergeMesh(s, areaStageRibs, areaBldShell, false);
+    areaBldMergeMesh(sd, areaStagePorts, em('#FFE1A0'), false);
     const back = box(13.0, 1.2, 0.8, areaBldShell); back.position.set(0, 0.6, -2.9); s.add(back);   // 半円の切り口をふさぎ、スクリーン枠の台にする
     const frame = box(11.8, 6.7, 0.5, MAT.white); frame.position.set(0, 4.55, -2.6); s.add(frame);
     stageTex = canvasTex(1024, 512, false);
@@ -1823,6 +2058,10 @@ body.sheet-open #banner{display:none}
       const post = cyl(0.18, 0.18, 9.6, MAT.white, 10); post.position.set(k * 6.6, 4.8, 1.6); s.add(post);
     });
     const truss = box(13.6, 0.32, 0.32, MAT.white); truss.position.set(0, 9.6, 1.6); s.add(truss);
+    const areaTrussParts = [];
+    areaTrussParts.push([new THREE.BoxGeometry(13.6, 0.09, 0.09), areaBldAt(null, 0, 9.1, 1.6)]);
+    for (let j = 0; j < 18; j++) areaTrussParts.push([new THREE.BoxGeometry(0.07, 0.88, 0.07), areaBldAt(null, -6.4 + j * 0.75, 9.35, 1.6, 0, 0, (j % 2 ? 1 : -1) * 0.98)]);
+    areaBldMergeMesh(sd, areaTrussParts, cm('#9BA8C7', 0, { metalness: 0.35, roughness: 0.35 }), false);
     const bm = areaBeamTheme(new THREE.MeshBasicMaterial({ color: z.color, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }), z.color, 0.15);   // スクリーンに重なるので少し淡く
     [-4.8, -1.6, 1.6, 4.8].forEach((x, k) => {
       const piv = new THREE.Group(); piv.position.set(x, 9.4, 1.6); sd.add(piv);
@@ -1865,10 +2104,13 @@ body.sheet-open #banner{display:none}
   // ---- そよかぜ公園：桜と緑の木・池・ベンチ・花の茂み ----
   function buildPark(z) {
     const trees = [[-11, -4], [-8, -10.5], [-2, -13], [5, -12.5], [11, -6], [12.5, 3], [-12.5, 4]].map(([lx, lz], k) => {
-      obsLocal(z.i, lx, lz, 1.0);
+      // テラスのベンチの外端まで衝突を合わせる（既存の入口・中央通路は空ける）。
+      obsLocal(z.i, lx, lz, k === 1 ? 2.72 : 1.0);
       return { x: lx, z: lz, ry: rand(0, TAU), s: rand(0.85, 1.2), green: k === 2 || k === 5 };
     });
     const grove = areaParkGrove(z.g, trees);
+    trees.forEach((t, k) => { if (k !== 1) areaGardenPlanter(z.g, t.x, t.z, 0.88); });
+    areaGardenTerrace(z.g, -8, -10.5);
     if (grove.petals) z.areaDetail.add(grove.petals);   // 木の下の散った花びら
     // 池：噴水の waterMat は光沢で白く飛ぶので、公園だけ水色の絵を貼った専用の素材にする
     const pondT = canvasTex(256, 256, true), pc = pondT.ctx, pg = pc.createRadialGradient(128, 128, 10, 128, 128, 128);
@@ -1882,8 +2124,9 @@ body.sheet-open #banner{display:none}
     obsLocal(z.i, 5, -3, 4.1);
     [[-5, -1, Math.PI / 2], [-3, -7, 0.5]].forEach(([lx, lz, ry]) => {
       const b = new THREE.Group(); b.position.set(lx, 0, lz); b.rotation.y = ry; z.areaDetail.add(b);
-      const seat = box(2.4, 0.18, 0.7, gm(z.color)); seat.position.y = 0.6;
-      const back = box(2.4, 0.6, 0.12, gm(z.color)); back.position.set(0, 1.0, -0.3);
+      areaContactShadow(z.g, lx + 0.08, lz + 0.08, 1.55, 0.73, 0.035, ry);
+      const seat = box(2.4, 0.18, 0.7, cm('#BFC4DF', 0, { roughness: 0.55 })); seat.position.y = 0.6;
+      const back = box(2.4, 0.6, 0.12, areaBldShell); back.position.set(0, 1.0, -0.3);
       b.add(seat, back);
       [-1, 1].forEach(s => { const l = box(0.12, 0.6, 0.6, MAT.white); l.position.set(s, 0.3, 0); b.add(l); });
       obsLocal(z.i, lx, lz, 1.3);
@@ -2007,9 +2250,9 @@ body.sheet-open #banner{display:none}
   }
   const objHaloMat = new THREE.MeshPhysicalMaterial({ color: '#C9C8FF', roughness: 0.15, clearcoat: 1, transparent: true, opacity: 0.8, envMapIntensity: 0.5 });
   // ガラスの泡
-  const objBubbleMats = ['#F3D9FF', '#D9E6FF', '#FFE1F1'].map(color => new THREE.MeshPhysicalMaterial({ color, roughness: 0.05, clearcoat: 1, transparent: true, opacity: 0.4, depthWrite: false }));
+  const objBubbleMats = ['#F3D9FF', '#D9E6FF', '#FFE1F1'].map(color => new THREE.MeshPhysicalMaterial({ color, roughness: 0.08, metalness: 0.08, clearcoat: 1, clearcoatRoughness: .04, envMapIntensity: .85, transparent: true, opacity: 0.21, depthWrite: false }));
   const objSphereGeo = new THREE.SphereGeometry(1, 32, 20), objSphereLoGeo = new THREE.SphereGeometry(1, 16, 12);
-  const objBubbleBandGeo = new THREE.TorusGeometry(1.03, 0.07, 8, 64);
+  const objBubbleBandGeo = new THREE.TorusGeometry(1.03, 0.028, 8, 64);
   const objBubbleConeGeo = new THREE.ConeGeometry(0.14, 0.3, 12);
 
   // ---- 1つずつの作り方 ----
@@ -2062,21 +2305,22 @@ body.sheet-open #banner{display:none}
   function objBubble(g, s, i) {
     const body = new THREE.Mesh(objSphereGeo, objBubbleMats[i % 3]); body.scale.setScalar(s);
     const gloss = objMerge([
-      [objBubbleBandGeo, '#A58BEF', objMat4(0, 0, 0, Math.PI / 2, 0, 0, s)],
+      [objBubbleBandGeo, '#A8B5CF', objMat4(0, 0, 0, Math.PI / 2, 0, 0, s)],
+      [objBubbleBandGeo, '#C3DDE7', objMat4(0, 0, 0, Math.PI / 3, .6, 0, s)],
       [objBubbleConeGeo, '#E07BE0', objMat4(0, -1.12 * s, 0, Math.PI, 0, 0, s)]
     ]);
     const glow = objMerge([
-      [objSphereLoGeo, pick(['#FFB3E6', '#9FE8FF', '#FFE97A']), objMat4(0, 0, 0, 0, 0, 0, 0.3 * s)],
+      [objOctGeo, pick(['#C3B9F2', '#98DBED', '#E8C981']), objMat4(0, 0, 0, .2, .5, 0, .22*s, .5*s, .22*s)],
       [objOctGeo, '#B9F0FF', objMat4(0, -1.4 * s, 0, 0, 0, 0, 0.08 * s, 0.11 * s, 0.08 * s)]
     ]);
     g.add(new THREE.Mesh(glow, MAT.glow), new THREE.Mesh(gloss, objGlossV), body);
   }
 
-  // ---- 配置：30個は島のまわりの見上げる範囲、18個は遠くに。各種12個ずつ ----
+  // ---- 配置：近景16・遠景12。球の数を抑え、各オブジェクトの構造を読みやすく ----
   // コアの確認用カメラ（正面 +z・横 +x）の視線の帯には置かない
   const objInCamLane = (x, z) => (Math.abs(x) < 25 && z > 30) || (Math.abs(z) < 25 && x > 30);
-  for (let k = 0; k < 48; k++) {
-    const near = k < 30, rMin = near ? 34 : 95, rMax = near ? 95 : 170;
+  for (let k = 0; k < 28; k++) {
+    const near = k < 16, rMin = near ? 34 : 95, rMax = near ? 95 : 170;
     let x, z, r, tries = 0;
     do { const a = rand(0, TAU); r = rand(rMin, rMax); x = Math.cos(a) * r; z = Math.sin(a) * r; tries++; } while ((!farFromIslands(x, z, 8) || objInCamLane(x, z)) && tries < 30);
     const kind = k % 4, i = Math.floor(k / 4), close = r < 50, mid = r < 60; // close・mid：コアに近いので大きいものは置かない
@@ -2085,11 +2329,41 @@ body.sheet-open #banner{display:none}
     else if (kind === 1) objGem(g, mid ? rand(1.0, 1.3) : rand(1.0, 1.9));
     else if (kind === 2) objRing(g, close ? rand(2, 3) : rand(2, 4.2), i % 3 === 2);
     else objBubble(g, mid ? rand(1.1, 1.5) : rand(1.1, 2.4), i);
-    floaters.push({ m: g, y, sp: rand(0.08, 0.35), ph: rand(0, TAU) });
+    floaters.push({ m: g, y, sp: kind === 0 ? .025 : rand(.04,.12), amp: kind === 0 ? .5 : .28, ph: rand(0, TAU) });
   }
+  // 資料のサポートドローン。白い卵形の外装・濃紺バイザー・細長い耳。
+  // 3体とも形を共有し、静的な部品は素材ごとに結合する（各4描画）。
+  const objDroneUpdates = [];
+  const objDroneShell = objMerge([
+    [objSphereLoGeo, '#F4F3FF', objMat4(0, 0, 0, 0, 0, 0, 0.68, 0.56, 0.53)],
+    ...[-1, 1].flatMap(s => [
+      [objSphereLoGeo, '#ECE8FF', objMat4(s * 0.29, 0.71, -0.08, 0, 0, -s * 0.21, 0.11, 0.46, 0.09)],
+      [objSphereLoGeo, '#F4F3FF', objMat4(s * 0.29, -0.5, 0.07, 0.2, 0, s * 0.15, 0.14, 0.19, 0.12)],
+      [objSphereLoGeo, '#FFE19B', objMat4(s * 0.67, 0, 0, 0, 0, 0, 0.13, 0.29, 0.29)]
+    ])
+  ]);
+  const objDroneVisor = new THREE.SphereGeometry(1, 20, 12);
+  objDroneVisor.scale(0.48, 0.32, 0.13); objDroneVisor.translate(0, 0.015, 0.48);
+  const objDroneVisorMat = new THREE.MeshPhysicalMaterial({color:'#142B58',roughness:0.13,metalness:0.12,clearcoat:1,envMapIntensity:0.35});
+  const objDroneLights = objMerge([-1, 1].flatMap(s => [
+    [objSphereLoGeo, '#65E9FF', objMat4(s * 0.18, 0.055, 0.60, 0, 0, 0, 0.046, 0.095, 0.025)],
+    [new THREE.TorusGeometry(0.24, 0.026, 6, 28), '#68E3F5', objMat4(s * 0.77, 0, 0, 0, Math.PI / 2, 0, 1)]
+  ]));
+  const objDroneSmile = new THREE.TorusGeometry(0.075, 0.014, 5, 18, Math.PI);
+  objDroneSmile.rotateZ(Math.PI); objDroneSmile.translate(0, -0.08, 0.615);
+  [[-15, 5.2, 10, 0.7], [13, 6.4, -14, 2.5], [-37, 8.3, -23, 0.2]].forEach(([x,y,z,ry],i) => {
+    const g = new THREE.Group(); g.position.set(x,y,z); g.rotation.y = ry;
+    g.add(new THREE.Mesh(objDroneShell,objGlossV),new THREE.Mesh(objDroneVisor,objDroneVisorMat),new THREE.Mesh(objDroneLights,MAT.glow),new THREE.Mesh(objDroneSmile,em('#FFD78E')));
+    scene.add(g);
+    objDroneUpdates.push(() => {
+      const t=time*(reduceMotion?0.12:0.45)+i*2.1;
+      g.position.y=y+Math.sin(t)*(reduceMotion?0.04:0.32);
+      g.rotation.z=Math.sin(t*0.7)*0.035; g.rotation.y=ry+Math.sin(t*0.43)*0.12;
+    });
+  });
   areaThemeHooks.push(() => { objGlossV.emissiveIntensity = T.dark ? 0.35 : 0; objGemMat.emissiveIntensity = T.dark ? 0.3 : 0.05; });
   // ---- ワールドコア（中央に浮かぶシンボル） -----------------------------
-  // 寸法はコア単位（世界座標 ＝ CORE_BASE ＋ y × CORE_S）。全高は下の玉の下端0.18〜上の玉の上端11.04
+  // 寸法はコア単位（世界座標 ＝ CORE_BASE ＋ y × CORE_S）。詳細版はローカル y=0〜11.8、最大半径5.85。
   const CORE_S = 3.2, CORE_BASE = 9;
   const core = new THREE.Group(); core.position.y = CORE_BASE; core.scale.setScalar(CORE_S); scene.add(core);
   const coreAnim = { fins: null, antenna: null, info: null, subs: [], displays: [], bits: [] };
@@ -2124,322 +2398,193 @@ body.sheet-open #banner{display:none}
   coreThemeFns.push(d => coreGlows.forEach(sp => { sp.material.opacity = d ? 1 : 0.4; }));
   // 回転体。pts は [半径, 高さ] を「下の中心→外→上→内」の順に（法線が外を向く）。同じ点を2つ並べるとそこで角が立つ
   const coreLathe = (pts, seg) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), seg || 64);
-  // 05 サイドフィン：太い端（切れこみつき）→細い先端へ半径も幅も細る鉤爪形。太い端を上、先端を下へねじり、外の縁を下げて（バンク）横からも面が見えるように
-  function crescentGeo(stops) {
-    const N = 48, SPAN = 1.9, RO0 = 3.8, RO1 = 2.35, W0 = 0.62, LIFT = 1.0, K = Math.tan(0.6);
-    const ro = t => RO0 + (RO1 - RO0) * t, wd = t => W0 * Math.pow(1 - t, 0.75) + 0.015, rm = t => ro(t) - wd(t) / 2;
-    const sh = new THREE.Shape();
-    for (let k = 0; k <= N; k++) { const t = k / N, a = t * SPAN, r = ro(t); k ? sh.lineTo(Math.cos(a) * r, Math.sin(a) * r) : sh.moveTo(Math.cos(a) * r, Math.sin(a) * r); }
-    for (let k = N; k >= 0; k--) { const t = k / N, a = t * SPAN, r = ro(t) - wd(t); sh.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
-    sh.lineTo(Math.cos(0.06 * SPAN) * (RO0 - W0 * 0.5), Math.sin(0.06 * SPAN) * (RO0 - W0 * 0.5));
-    const geo = new THREE.ExtrudeGeometry(sh, { depth: 0.07, bevelEnabled: true, bevelThickness: 0.035, bevelSize: 0.03, bevelSegments: 2, curveSegments: 4 });
-    geo.translate(0, 0, -0.035);
-    const tOf = (x, y) => clamp(Math.atan2(y, x) / SPAN, 0, 1), white = new THREE.Color('#FFFFFF');
-    // 上面と側面は色そのまま、裏は4割だけ白に寄せる（正面・横・下から見上げても色の帯が見える）
-    paint(geo, (x, y, z) => { const c = gradAt(stops, tOf(x, y)); return z < -0.01 ? c.lerp(white, 0.4) : c; });
-    const p = geo.attributes.position, n0 = geo.attributes.normal, side = new Float32Array(p.count);
-    for (let k = 0; k < p.count; k++) side[k] = Math.abs(n0.getZ(k)) > 0.99 ? Math.sign(n0.getZ(k)) : 0;
-    // ねじり（太い端 +LIFT／先端 −LIFT）＋バンク約34°（帯のまん中の高さは変えず、外の縁を下げる＝上面が外と上を向く）
-    for (let k = 0; k < p.count; k++) {
-      const x = p.getX(k), y = p.getY(k), t = tOf(x, y);
-      p.setZ(k, p.getZ(k) + LIFT * (1 - 2 * t) - K * (Math.hypot(x, y) - rm(t)));
-    }
-    geo.computeVertexNormals();
-    // 上面・裏面はねじれ＋バンクした面 z = f(r, θ) の法線を式で入れる（大きな三角形でも陰影がなめらかになる）
-    const nr = geo.attributes.normal, g = 2 * LIFT / SPAN, v = new THREE.Vector3();
-    for (let k = 0; k < p.count; k++) {
-      if (!side[k]) continue;
-      const x = p.getX(k), y = p.getY(k), r2 = Math.max(0.01, x * x + y * y), r = Math.sqrt(r2), t = tOf(x, y);
-      const t0 = Math.max(0, t - 0.01), t1 = Math.min(1, t + 0.01), A = -g + K * (rm(t1) - rm(t0)) / ((t1 - t0) * SPAN); // A = ∂f/∂θ
-      v.set(A * y / r2 + K * x / r, -A * x / r2 + K * y / r, 1).multiplyScalar(side[k]).normalize(); nr.setXYZ(k, v.x, v.y, v.z);
-    }
-    return geo;
-  }
+  // 2026-11-12 詳細資料：機械球ではなく、結晶球・蓮のクラウン・水平軌道・浮遊アンカー。
+  // 寸法図は版ごとに異なるため、既存の街のスケールと地上の通路を維持する。
   function buildCore() {
-    const add = (m, y, x, z) => { m.position.set(x || 0, y, z || 0); core.add(m); return m; };
-    const cylM = (rt, rb, h, mat, seg, open) => new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg || 48, 1, !!open), mat);
-    const sphGeo = {}, sph = (r, mat) => new THREE.Mesh(sphGeo[r] || (sphGeo[r] = new THREE.SphereGeometry(r, 24, 16)), mat);
-    const ring = (r, t, mat, y, seg, ts) => { const m = new THREE.Mesh(new THREE.TorusGeometry(r, t, ts || 10, seg || 64), mat); m.rotation.x = Math.PI / 2; m.position.y = y; core.add(m); return m; };
-    const col = c => new THREE.Color(c), E = 0.002, dummy = new THREE.Object3D();
-    const instanced = (geo, mat, n, fn) => {
+    const add = (m, y, x = 0, z = 0, parent = core) => { m.position.set(x, y, z); parent.add(m); return m; };
+    const cylM = (rt, rb, h, mat, n = 64, open = false) => new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, n, 1, open), mat);
+    const ring = (r, t, mat, y, parent = core) => { const m = new THREE.Mesh(new THREE.TorusGeometry(r, t, 8, 128), mat); m.rotation.x = Math.PI / 2; return add(m, y, 0, 0, parent); };
+    const coreDummy = new THREE.Object3D();
+    const instanced = (geo, mat, n, fn, parent = core) => {
       const im = new THREE.InstancedMesh(geo, mat, n);
-      for (let k = 0; k < n; k++) { dummy.position.set(0, 0, 0); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1); fn(k, dummy); dummy.updateMatrix(); im.setMatrixAt(k, dummy.matrix); }
-      im.instanceMatrix.needsUpdate = true; im.frustumCulled = false; core.add(im); return im;
+      for (let k = 0; k < n; k++) { coreDummy.position.set(0, 0, 0); coreDummy.rotation.set(0, 0, 0); coreDummy.scale.set(1, 1, 1); fn(k, coreDummy); coreDummy.updateMatrix(); im.setMatrixAt(k, coreDummy.matrix); }
+      im.instanceMatrix.needsUpdate = true; im.frustumCulled = false; parent.add(im); return im;
     };
-    const poleMat = coreGloss('#C9C3E8');
-
-    // 09 下部ユニット（エネルギーコア）：上からマゼンタ→シアン発光→オレンジ→白い皿→黄緑→青いベル→黄色のカップと発光玉→ミント→白い円錐→軸→紫の玉
-    add(cylM(0.92, 0.82, 0.12, coreGloss('#D24FD8'), 64), 3.42);
-    add(cylM(0.82, 0.62, 0.06, coreGloss('#7B43F8'), 64), 3.33);
-    // シアンの発光筒：芯は高さのまん中が白く、上下が鮮やかなシアン（中の白い芯は外から見えないので芯そのものを塗り分けた）。外側は水色のガラス
-    const tubeG = new THREE.CylinderGeometry(0.5, 0.5, 0.42, 32, 6);
-    paint(tubeG, (x, y) => gradAt(['#F2FEFF', '#9FEEFF', '#3FD0FF'], Math.abs(y) / 0.21));
-    add(new THREE.Mesh(tubeG, MAT.glow), 3.08);
-    add(cylM(0.62, 0.62, 0.46, coreTint('#7FE6FF', 0.35), 32), 3.08);
-    ring(0.62, 0.02, em('#BFF6FF'), 2.86, 48, 6); ring(0.62, 0.02, em('#BFF6FF'), 3.30, 48, 6);
-    add(coreGlow('#4CD3FF', 1.6), 3.08);
-    add(cylM(0.64, 0.64, 0.08, coreGloss('#FC941E'), 48), 2.81);
-    add(cylM(0.6, 1.1, 0.08, MAT.white, 64), 2.73);
-    add(cylM(1.1, 0.5, 0.14, coreLilac, 64), 2.62);
-    ring(1.1, 0.02, em('#C9D4FF'), 2.69, 96, 6);
-    add(cylM(0.45, 0.45, 0.05, coreGloss('#FEEA08'), 32), 2.525);
-    add(cylM(0.44, 0.44, 0.03, coreGloss('#90EC3C'), 32), 2.485);
-    const bellG = new THREE.SphereGeometry(0.46, 32, 12, 0, TAU, Math.PI / 2, Math.PI / 2);
-    paint(bellG, (x, y) => gradAt(['#8CEBF9', '#4783EB'], -y / 0.46));
-    const bell = add(new THREE.Mesh(bellG, coreGlossV), 2.47); bell.scale.y = 0.9;
-    add(cylM(0.16, 0.16, 0.1, MAT.white, 24), 2.0);
-    add(cylM(0.66, 0.3, 0.18, coreGloss('#F5C542'), 48), 1.86);
-    add(new THREE.Mesh(new THREE.SphereGeometry(0.3, 24, 16), em('#FFC83A')), 1.48).scale.y = 1.3;
-    add(new THREE.Mesh(new THREE.SphereGeometry(0.34, 24, 16), coreTint('#FFE97A', 0.3)), 1.48).scale.y = 1.3;
-    add(coreGlow('#FFD23F', 1.1), 1.48);
-    add(cylM(0.3, 0.3, 0.14, em('#74FACD'), 32), 1.1);
-    const lowConeG = new THREE.CylinderGeometry(0.3, 0.05, 0.42, 32);
-    paint(lowConeG, (x, y) => gradAt(['#FFFFFF', '#C9B8F4'], (0.21 - y) / 0.42));
-    add(new THREE.Mesh(lowConeG, coreWhiteLiftV), 0.82);
-    add(cylM(0.025, 0.025, 0.12, coreGloss('#B7B9D6'), 8), 0.55);
-    add(sph(0.16, coreGloss('#B05CE8')), 0.34);
-
-    // 07 メインプラットフォーム：外側はレンズ形の白い皿、内側にマゼンタ地にシアンの窓が並ぶ「窓の帯」のリング
-    // 上の皿は中心の白→縁のラベンダー（頂点色）
-    const plateG = new THREE.CylinderGeometry(2.8, 4.1, 0.09, 128);
-    paint(plateG, (x, y, z) => gradAt(['#FFFFFF', '#ECE4FF'], (Math.hypot(x, z) - 2.8) / 1.3));
-    add(new THREE.Mesh(plateG, coreWhiteV), 4.455);
-    const plateUnderG = new THREE.CylinderGeometry(4.1, 2.8, 0.16, 128);
-    paint(plateUnderG, (x, y, z) => gradAt(['#FFFFFF', '#D4C6F8'], (Math.hypot(x, z) - 2.8) / 1.3));
-    add(new THREE.Mesh(plateUnderG, coreUnderV), 4.33);
-    ring(4.1, 0.03, em('#C9D4FF'), 4.41, 200, 8);
-    // 下面の同心円の線（下面の高さ 4.25＋(r−2.8)/1.3×0.16 の少し下に半分埋める）
-    ring(3.4, 0.015, em('#C9D4FF'), 4.318, 160, 6);
-    ring(2.9, 0.015, em('#F6A8E0'), 4.257, 160, 6);
-    // 上面の切れたリング（水色・緑）：皿の傾きに沿わせ、4分割で端3%ずつすき間（上面のオレンジの弧と同じ向き）
-    const plateTopY = r => 4.5 - (r - 2.8) / 1.3 * 0.09;
-    [[3.05, 3.2, '#50CEFD'], [3.45, 3.6, '#90EC3C']].forEach(([r0, r1, color]) => {
-      const n = 40, pos = [], idx = [], gap = 0.03 * TAU / 4;
-      for (let s = 0; s < 4; s++) {
-        const a0 = s * TAU / 4 + gap, a1 = (s + 1) * TAU / 4 - gap, base = pos.length / 3;
-        for (let i = 0; i <= n; i++) {
-          const a = a0 + (a1 - a0) * i / n, ca = Math.cos(a), sa = Math.sin(a);
-          pos.push(ca * r0, plateTopY(r0) + 0.004, sa * r0, ca * r1, plateTopY(r1) + 0.004, sa * r1);
-          if (i < n) { const b = base + i * 2; idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2); }
-        }
+    // 結晶は面ごとに色を分け、昼にも輪郭を保つ。透明面の深度書き込みはしない。
+    const coreCrystalMat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.16, metalness: 0.06, clearcoat: 1, clearcoatRoughness: 0.1, envMapIntensity: 0.45, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.FrontSide, emissive: '#FFFFFF', emissiveIntensity: 0.16 });
+    coreCrystalMat.onBeforeCompile = coreVColorEmi;
+    const coreEdgeMat = new THREE.LineBasicMaterial({ color: '#E8FAFF', transparent: true, opacity: 0.72 });
+    coreThemeFns.push(d => { coreCrystalMat.emissiveIntensity = d ? 0.5 : 0.16; coreEdgeMat.opacity = d ? 0.9 : 0.72; });
+    const coreFacets = (geo, stops) => {
+      const g = geo.index ? geo.toNonIndexed() : geo, p = g.attributes.position, colors = [];
+      for (let i = 0; i < p.count; i += 3) {
+        const y = (p.getY(i) + p.getY(i + 1) + p.getY(i + 2)) / 3;
+        const c = gradAt(stops, ((i / 3 * 0.381966) + y * 0.17 + 10) % 1);
+        for (let j = 0; j < 3; j++) colors.push(c.r, c.g, c.b);
       }
-      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
-      core.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })));
-    });
-    const coreWinTex = (() => {
-      const ct = canvasTex(1024, 40, false), c = ct.ctx, n = 48, step = 1024 / n;
-      c.fillStyle = '#F64FC0'; c.fillRect(0, 0, 1024, 40);
-      c.fillStyle = '#C93AA8'; c.fillRect(0, 0, 1024, 4); c.fillRect(0, 36, 1024, 4);
-      for (let k = 0; k < n; k++) { rr(c, k * step + 4, 10, step - 8, 20, 6); c.fillStyle = k % 6 ? '#9FF3FF' : '#FFFFFF'; c.fill(); }
-      ct.t.needsUpdate = true; return ct.t;
-    })();
-    add(cylM(2.78, 2.78, 0.28, new THREE.MeshBasicMaterial({ map: coreWinTex }), 128, true), 4.64);
-    add(cylM(2.74, 2.78, 0.06, MAT.white, 128), 4.81);
-    ring(2.74, 0.06, MAT.white, 4.82, 128);
-    const arcG = new THREE.RingGeometry(2.15, 2.6, 192, 1), arcGap = col('#FFFFFF');
-    paint(arcG, (x, y) => { const u = (((Math.atan2(y, x) / TAU + 1) % 1) * 4) % 1; return u < 0.04 || u > 0.96 ? arcGap : gradAt(['#FC941E', '#FEEA08'], u); });
-    const arc = add(new THREE.Mesh(arcG, new THREE.MeshBasicMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })), 4.845); arc.rotation.x = -Math.PI / 2;
-    add(cylM(2.78, 2.0, 0.4, coreLilac, 128), 4.15);
-    // 都市層：外側の皿の上面（r3.0〜3.6）に細い光の柱
-    const bldY = r => 4.5 - (r - 2.8) / 1.3 * 0.09;
-    const blds = Array.from({ length: 12 }, (_, k) => ({ a: k / 12 * TAU + rand(-0.12, 0.12), r: rand(3.0, 3.6), h: rand(0.12, 0.32) }));
-    instanced(new THREE.CylinderGeometry(0.06, 0.08, 1, 6), MAT.white, 12, (k, d) => { const b = blds[k]; d.position.set(Math.cos(b.a) * b.r, bldY(b.r) + b.h / 2 - 0.01, Math.sin(b.a) * b.r); d.scale.y = b.h; });
-    instanced(new THREE.CylinderGeometry(0.065, 0.065, 0.03, 6), em('#7FE6FF'), 12, (k, d) => { const b = blds[k]; d.position.set(Math.cos(b.a) * b.r, bldY(b.r) + b.h + 0.005, Math.sin(b.a) * b.r); });
-
-    // 07 下面：コバルトブルーの角ブロックの輪（窓つき）と中心のハブ
-    instanced(new THREE.BoxGeometry(0.42, 0.32, 0.22), coreBlockMat, 28, (k, d) => { const a = k / 28 * TAU; d.position.set(Math.cos(a) * 2.05, 3.79, Math.sin(a) * 2.05); d.rotation.y = -a - Math.PI / 2; });
-    instanced(new THREE.PlaneGeometry(0.28, 0.1), new THREE.MeshBasicMaterial({ color: '#A8F0FF', polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), 28, (k, d) => { const a = k / 28 * TAU, r = 2.05 + 0.112; d.position.set(Math.cos(a) * r, 3.82, Math.sin(a) * r); d.rotation.y = Math.PI / 2 - a; });
-    add(cylM(0.62, 0.55, 0.4, coreLilac, 48), 3.75);
-    add(cylM(0.56, 0.56, 0.05, coreGloss('#F5C542'), 48), 3.525);
-
-    // 08 サブリング群（浮遊ステージ）：大4・小4のコマ形を皿の下に吊るす。吊り棒は揺れない core に直接置く
-    const subG = {
-      top: new THREE.CylinderGeometry(0.36, 0.55, 0.1, 32), cone: new THREE.CylinderGeometry(0.55, 0.04, 0.5, 32),
-      dome: new THREE.SphereGeometry(0.34, 24, 8, 0, TAU, 0, Math.PI / 2), tip: new THREE.SphereGeometry(0.05, 12, 8),
-      rim: new THREE.TorusGeometry(0.55, 0.018, 6, 48)
+      g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3)); return g;
     };
-    paint(subG.cone, (x, y) => gradAt(['#FFFFFF', '#BFAAF2'], (0.25 - y) / 0.5)); // 下へ行くほどラベンダー
+    const coreGemGeo = coreFacets(new THREE.OctahedronGeometry(1, 0), ['#7EDFFF', '#B68AFF', '#FA93DF', '#FFE09C', '#C5EFFF']);
+    const coreGem = (y, width, height, parent = core) => {
+      const g = new THREE.Group(); g.position.y = y; parent.add(g);
+      const m = new THREE.Mesh(coreGemGeo, coreCrystalMat); m.scale.set(width, height, width); g.add(m);
+      const wire = new THREE.LineSegments(new THREE.EdgesGeometry(coreGemGeo), coreEdgeMat); wire.scale.copy(m.scale); g.add(wire);
+      return g;
+    };
+
+    // 下部アンカー：独立した長いダイヤと、光を集める金色のコア。
+    const coreAnchor = coreGem(0.72, 0.34, 0.72);
+    coreAnim.displays.push({ m: coreAnchor, y: 0.72, ph: 1.5 });
+    add(cylM(0.025, 0.025, 0.3, em('#FFD571'), 8), 1.59);
+    add(cylM(0.44, 0.08, 0.48, coreGloss('#8F75E9'), 32), 1.96);
+    ring(0.43, 0.025, em('#5CDFFF'), 2.19);
+    add(cylM(0.68, 0.4, 0.38, coreGloss('#E4AF55')), 2.42);
+    add(cylM(0.84, 0.64, 0.14, coreGloss('#FFE0A1')), 2.67);
+    add(cylM(0.42, 0.55, 0.35, em('#FFC85A')), 2.89);
+    add(coreGlow('#FFC753', 1.7), 2.93);
+    ring(0.7, 0.055, em('#FFE4A0'), 3.08);
+    add(cylM(1.2, 0.65, 0.28, coreLilac), 3.28);
+    ring(1.18, 0.035, em('#F9A5E3'), 3.43);
+    // 細い金色のリブで、白い面を塗り潰さずエネルギーの集束方向を見せる。
+    instanced(new THREE.CylinderGeometry(0.018, 0.018, 0.7, 6), coreGloss('#F1BF6D'), 12, (k, d) => {
+      const a = k / 12 * TAU; d.position.set(Math.sin(a) * 0.82, 3.45, Math.cos(a) * 0.82); d.rotation.set(Math.cos(a) * 0.45, 0, -Math.sin(a) * 0.45);
+    });
+
+    // 都市デッキ：厚い一枚皿ではなく、3層の外装と透明な回廊を積層。
+    const coreDeckGeo = coreLathe([[0, 3.52], [1.1, 3.52], [2.5, 3.76], [4.65, 4.08], [4.95, 4.22], [4.95, 4.35], [4.6, 4.43], [0, 4.43]], 128);
+    paint(coreDeckGeo, (x, y, z) => gradAt(['#B0B4E4', '#DEE2FA', '#FFFFFF'], (y - 3.52) / 0.91));
+    add(new THREE.Mesh(coreDeckGeo, coreWhiteLiftV), 0);
+    ring(4.91, 0.045, em('#A8DFFF'), 4.23);
+    ring(4.64, 0.038, em('#FFC976'), 4.07);
+    ring(3.42, 0.028, em('#A18AFF'), 3.88);
+    add(cylM(3.35, 3.75, 0.17, coreLilac), 4.53);
+    add(cylM(3.35, 3.35, 0.25, coreGloss('#424786')), 4.74);
+    const coreWindowGeo = new THREE.PlaneGeometry(0.15, 0.12);
+    instanced(coreWindowGeo, em('#7BE5FF'), 48, (k, d) => { const a = k / 48 * TAU; d.position.set(Math.sin(a) * 3.36, 4.75, Math.cos(a) * 3.36); d.rotation.y = a; });
+    add(cylM(3.37, 3.37, 0.1, MAT.white), 4.94);
+    ring(3.36, 0.025, em('#F6B0E7'), 5.0);
+    const coreDeckGlass = coreTint('#8CDCF9', 0.24);
+    add(cylM(4.7, 4.7, 0.32, coreDeckGlass, 128, true), 4.61);
+    ring(4.7, 0.025, coreGloss('#D9DDF5'), 4.78);
+    instanced(new THREE.CylinderGeometry(0.014, 0.014, 0.32, 5), coreGloss('#B5B7DF'), 40, (k, d) => { const a = k / 40 * TAU; d.position.set(Math.sin(a) * 4.7, 4.61, Math.cos(a) * 4.7); });
+    instanced(new THREE.BoxGeometry(0.06, 0.035, 0.46), coreGloss('#C3C8E8'), 36, (k, d) => { const a = k / 36 * TAU; d.position.set(Math.sin(a) * 4.2, 4.44, Math.cos(a) * 4.2); d.rotation.y = a; });
+    // 中央デッキの下を巡る浮遊ユニット。4基に整理して大きなシルエットを保つ。
+    for (let k = 0; k < 4; k++) {
+      const a = k / 4 * TAU + Math.PI / 4, g = new THREE.Group(), y = 3.42;
+      g.position.set(Math.sin(a) * 3.75, y, Math.cos(a) * 3.75); core.add(g);
+      add(cylM(0.43, 0.25, 0.15, MAT.white, 32), 0.05, 0, 0, g);
+      add(cylM(0.25, 0.02, 0.32, coreLilac, 32), -0.18, 0, 0, g);
+      ring(0.43, 0.018, em('#A2E9FF'), 0.12, g);
+      add(cylM(0.11, 0.025, 0.16, em('#FFD46D'), 16), -0.4, 0, 0, g);
+      coreAnim.subs.push({ g, y, ph: k * 1.5 });
+    }
+
+    // 球体の受け皿と、浮遊する短い情報パネル。
+    add(cylM(1.16, 1.7, 0.18, MAT.white), 5.2);
+    ring(1.62, 0.035, em('#98E7FF'), 5.12);
+    add(cylM(0.32, 0.98, 0.35, coreGloss('#B8A2EB')), 5.46);
+    const info = new THREE.Group(); info.position.y = 5.57; core.add(info); coreAnim.info = info;
     for (let k = 0; k < 8; k++) {
-      const big = k % 2 === 0, j = k >> 1;
-      const a = big ? Math.PI / 4 + j * Math.PI / 2 : j * Math.PI / 2, d = big ? 3.35 : 3.0, y = big ? 3.05 : 3.45, s = big ? 1 : 0.7;
-      const x = Math.cos(a) * d, z = Math.sin(a) * d;
-      const g = new THREE.Group(); g.position.set(x, y, z); g.scale.setScalar(s); core.add(g);
-      const top = new THREE.Mesh(subG.top, MAT.white); top.position.y = 0.05; g.add(top);
-      const cone = new THREE.Mesh(subG.cone, coreWhiteLiftV); cone.position.y = -0.25; g.add(cone);
-      const dome = new THREE.Mesh(subG.dome, coreGloss('#FFD23F')); dome.position.y = 0.1; dome.scale.y = 0.45; g.add(dome);
-      const tip = new THREE.Mesh(subG.tip, coreGloss('#B05CE8')); tip.position.y = -0.52; g.add(tip);
-      const rim = new THREE.Mesh(subG.rim, em('#C9D4FF')); rim.rotation.x = Math.PI / 2; g.add(rim);
-      coreAnim.subs.push({ g, y, ph: k });
-      const lo = y + 0.253 * s - 0.12, hi = 4.25 + (d - 2.8) / 1.3 * 0.16 + 0.05;
-      add(cylM(0.012, 0.012, hi - lo, poleMat, 6), (lo + hi) / 2, x, z);
+      const a = k / 8 * TAU, p = new THREE.Mesh(panelGeo, uiMats[k % 3]); p.scale.setScalar(0.38); p.position.set(Math.sin(a) * 1.85, 0, Math.cos(a) * 1.85); p.rotation.y = a; info.add(p);
     }
 
-    // 06 情報リング：青い円錐＋色の帯の円盤、パネルの輪（シアン・グリーン主体）、マゼンタの切れた弧、砂時計形の首
-    add(cylM(1.0, 0.45, 0.26, coreGloss('#4B61F1'), 64), 4.97);
-    const bandG = coreLathe([[0, 5.1], [1.15, 5.1], [1.15, 5.1], [1.2, 5.16], [1.2, 5.16], [1.0 + E, 5.16], [1.0 - E, 5.16], [0.8 + E, 5.16], [0.8 - E, 5.16], [0.6 + E, 5.16], [0.6 - E, 5.16], [0, 5.16]], 64);
-    paint(bandG, (x, y, z) => { const r = Math.hypot(x, z); return col(y < 5.13 || r > 1.0 ? '#50CEFD' : r > 0.8 ? '#C8F03C' : r > 0.6 ? '#FEEA08' : '#FFFFFF'); });
-    add(new THREE.Mesh(bandG, coreGlossV), 0);
-    const info = new THREE.Group(); info.position.y = 5.36; core.add(info);
-    for (let k = 0; k < 18; k++) {
-      const a = k / 18 * TAU, p = new THREE.Mesh(panelGeo, uiMats[[0, 2, 0, 2, 1][k % 5]]);
-      p.scale.setScalar(0.42); p.position.set(Math.cos(a) * 1.25, 0, Math.sin(a) * 1.25); p.rotation.y = Math.PI / 2 - a; info.add(p);
-    }
-    const arcInfoG = new THREE.TorusGeometry(1.27, 0.03, 6, 24, TAU / 4 - 0.3);
-    for (let k = 0; k < 4; k++) { const m = new THREE.Mesh(arcInfoG, em('#F64FC0')); m.rotation.set(Math.PI / 2, 0, k * Math.PI / 2 + 0.15); m.position.y = 0.2; info.add(m); }
-    { const m = new THREE.Mesh(new THREE.TorusGeometry(1.25, 0.012, 6, 96), em('#74FACD')); m.rotation.x = Math.PI / 2; m.position.y = -0.17; info.add(m); }
-    coreAnim.info = info;
-    add(new THREE.Mesh(coreLathe([[0.42, 5.13], [0.3, 5.3], [0.12, 5.6], [0.14, 5.72], [0.34, 5.92]], 32), MAT.white), 0);
-    ring(0.15, 0.025, coreGloss('#FCC1DF'), 5.62, 32, 6);
-    for (let k = 0; k < 4; k++) {
-      const a = k * Math.PI / 2, rod = cylM(0.01, 0.01, 0.7, poleMat, 6); rod.rotation.set(0, -a, Math.PI / 2);
-      add(rod, 5.13, Math.cos(a) * 1.55, Math.sin(a) * 1.55);
-      add(sph(0.05, em('#7FE6FF')), 5.13, Math.cos(a) * 1.9, Math.sin(a) * 1.9);
-    }
+    // 多面体のエネルギー球。面法線・透明外殻・実体のある細いフレームを分離。
+    const coreSphereGeo = coreFacets(new THREE.IcosahedronGeometry(1.38, 2), ['#75DBF3', '#7F91DC', '#AA79DB', '#ED94CB', '#E0F8FF']);
+    coreSphereGeo.computeVertexNormals(); // 非共有頂点の面法線で、ライトを受けた結晶面に差をつける
+    const coreOrbMat = coreCrystalMat.clone(); coreOrbMat.opacity = 0.92; coreOrbMat.roughness = 0.13; coreOrbMat.envMapIntensity = 0.62; coreOrbMat.onBeforeCompile = coreVColorEmi;
+    coreThemeFns.push(d => { coreOrbMat.emissiveIntensity = d ? 0.28 : 0.11; });
+    const coreOrbGroup = new THREE.Group(); add(coreOrbGroup, 7.12);
+    const coreOrb = new THREE.Mesh(coreSphereGeo, coreOrbMat); coreOrbGroup.add(coreOrb);
+    // EdgesGeometryの線を、細い銀色の円柱へ。一括描画で継ぎ目にも厚みと反射を付ける。
+    const coreSphereEdgeGeo = new THREE.EdgesGeometry(coreSphereGeo, 7), coreEdgePos = coreSphereEdgeGeo.attributes.position;
+    const coreEdgeStart = new THREE.Vector3(), coreEdgeEnd = new THREE.Vector3(), coreEdgeDir = new THREE.Vector3(), coreUp = new THREE.Vector3(0,1,0);
+    instanced(new THREE.CylinderGeometry(0.005,0.005,1,5),coreGloss('#C9E8F5'),coreEdgePos.count/2,(k,d)=>{
+      coreEdgeStart.fromBufferAttribute(coreEdgePos,k*2); coreEdgeEnd.fromBufferAttribute(coreEdgePos,k*2+1); coreEdgeDir.subVectors(coreEdgeEnd,coreEdgeStart);
+      d.position.copy(coreEdgeStart).add(coreEdgeEnd).multiplyScalar(0.5); d.scale.y=coreEdgeDir.length(); d.quaternion.setFromUnitVectors(coreUp,coreEdgeDir.normalize());
+    },coreOrbGroup);
+    const coreCoatMat = new THREE.MeshPhysicalMaterial({ color:'#DDF4FF',roughness:0.035,metalness:0,clearcoat:1,clearcoatRoughness:0.045,transparent:true,opacity:0.075,depthWrite:false,envMapIntensity:0.85 });
+    coreOrbGroup.add(new THREE.Mesh(new THREE.SphereGeometry(1.395,48,32),coreCoatMat));
+    const coreNucleus = add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.57,1),em('#B4EDFF')),7.12);
+    const coreOrbGlow = add(coreGlow('#9EDFFF',2.4),7.12);
+    spinners.push({m:coreOrbGroup,sp:0.085},{m:coreNucleus,sp:-0.12});
+    // 球の内側を逆向きに周回する光の軌跡。外殻・街の輪とは独立した回転。
+    const coreInnerOrbit = new THREE.Group(); add(coreInnerOrbit,7.12);
+    const coreTrace = new THREE.Mesh(new THREE.TorusGeometry(0.95,0.012,6,96,TAU*0.76),em('#D7F7FF')); coreTrace.rotation.set(0.8,0.2,0.35); coreInnerOrbit.add(coreTrace);
+    const coreTrace2 = new THREE.Mesh(new THREE.TorusGeometry(0.81,0.009,6,80,TAU*0.64),em('#F5C4EC')); coreTrace2.rotation.set(-0.65,0.45,1.0); coreInnerOrbit.add(coreTrace2);
+    [coreTrace,coreTrace2].forEach(m=>{m.material.transparent=true;m.material.depthWrite=false;});
+    spinners.push({m:coreInnerOrbit,sp:-0.16});
+    // e70からdt/timeを渡す。幾何の生成・乱数・ライト追加は毎フレーム行わない。
+    coreAnim.update = (dt,time,motion=1) => {
+      const pulse=Math.sin(time*0.85)*motion;
+      coreNucleus.scale.setScalar(1+pulse*0.035);
+      coreOrbGlow.material.opacity=(T.dark?0.8:0.28)+pulse*0.045;
+      coreTrace.material.opacity=0.74+pulse*0.08;
+    };
 
-    // 04 コアユニット（演算コア）：上が紫のキャップ、白→クリームの帯→オレンジ・マゼンタ・紫のおわん
-    const R = 1.2, cy = 7.1, C = new THREE.Vector3(0, cy, 0);
-    const coreShellTex = (() => {
-      const H = 512, ct = canvasTex(4, H, false), c = ct.ctx;
-      const band = ny => ny >= 0.94 ? '#A45CF0' : ny >= 0.18 ? '#EFEBFA' : ny >= -0.24 ? '#E6E1F4' : ny >= -0.74 ? '#F4EBD2' : ny >= -0.82 ? '#FC941E' : ny >= -0.9 ? '#D24FD8' : ny >= -0.96 ? '#7B43F8' : '#5B55E0';
-      for (let py = 0; py < H; py++) { c.fillStyle = band(Math.cos(Math.PI * (py + 0.5) / H)); c.fillRect(0, py, 4, 1); }
-      ct.t.needsUpdate = true; return ct.t;
-    })();
-    const coreShellMat = new THREE.MeshPhysicalMaterial({ map: coreShellTex, roughness: 0.32, metalness: 0, clearcoat: 0.5, clearcoatRoughness: 0.2, envMapIntensity: 0.4 });
-    coreThemeFns.push(d => { coreShellMat.envMapIntensity = d ? 0.6 : 0.4; });
-    add(new THREE.Mesh(new THREE.SphereGeometry(R, 64, 48), coreShellMat), cy);
-    add(cylM(0.4, 0.44, 0.06, coreGloss('#A45CF0'), 48), 8.3);
-    add(sph(0.16, coreGloss('#5B55E0')), 5.88);
-    ring(1.18, 0.01, cm('#BDB6DA'), cy + 0.216, 96, 6);
-    const onSurface = (dir, dist) => { const g = new THREE.Group(); g.position.copy(dir.clone().multiplyScalar(dist).add(C)); g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir); core.add(g); return g; };
-    const winDir = new THREE.Vector3(0.6, 0.06, 0.8).normalize();
-    // 金の帯（窓のところで切れる）：切れ目の中心を窓の方位に向ける
-    const gold = add(new THREE.Mesh(new THREE.TorusGeometry(1.165, 0.028, 8, 96, 4.4), coreGloss('#F5C542')), cy - 0.29);
-    gold.rotation.set(Math.PI / 2, 0, Math.atan2(winDir.z, winDir.x) - (4.4 + TAU) / 2);
-    // 窓：太いオレンジの輪→白い輪→シアンに光るガラス（中心が明るい）
-    const win = onSurface(winDir, R - 0.03);
-    const winTex = (() => {
-      const ct = canvasTex(256, 256, false), c = ct.ctx, g = c.createRadialGradient(128, 128, 0, 128, 128, 128);
-      g.addColorStop(0, '#FFFFFF'); g.addColorStop(0.35, '#BFF6FF'); g.addColorStop(0.75, '#4CD3FF'); g.addColorStop(1, '#3F55D8');
-      c.fillStyle = g; c.fillRect(0, 0, 256, 256);
-      c.strokeStyle = 'rgba(255,255,255,0.75)'; c.lineWidth = 16; c.lineCap = 'round';
-      c.beginPath(); c.arc(128, 128, 90, Math.PI * 0.95, Math.PI * 1.55); c.stroke();
-      ct.t.needsUpdate = true; return ct.t;
-    })();
-    win.add(new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.1, 14, 64), coreGloss('#F57A12')));
-    const wm = new THREE.Mesh(new THREE.TorusGeometry(0.44, 0.045, 10, 64), MAT.white); wm.position.z = 0.03; win.add(wm);
-    const wg = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.014, 6, 64), em('#7FE6FF')); wg.position.z = 0.07; win.add(wg);
-    const wd = new THREE.Mesh(new THREE.CircleGeometry(0.45, 48), new THREE.MeshBasicMaterial({ map: winTex })); wd.position.z = 0.04; win.add(wd);
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.45, 32, 16, 0, TAU, 0, Math.PI / 2), MAT.glass); dome.rotation.x = Math.PI / 2; dome.scale.set(1, 0.25, 1); dome.position.z = 0.04; win.add(dome);
-    const wgl = coreGlow(PAL.cyan, 1.0); wgl.position.z = 0.2; win.add(wgl);
-    // 背面の紋章：金の菱形の枠＋紫の中身
-    const emb = onSurface(new THREE.Vector3(0, 0.05, -1).normalize(), R);
-    emb.add(new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.035, 6, 4), coreGloss('#F5C542')));
-    const dia = new THREE.Mesh(new THREE.OctahedronGeometry(0.17, 0), coreGloss('#C9A6FF')); dia.scale.set(1, 1.25, 0.35); emb.add(dia);
-
-    // 球のまわりの節点：赤道の前後左右に腕（左右＝紫の玉、前だけオレンジの玉。資料は玉が4〜5個なので後ろと腕の先の玉はなし）、左上・右上にオレンジの小玉、縦の棒の先の紫の玉＋小カード
-    for (let k = 0; k < 4; k++) {
-      const a = k * Math.PI / 2, ca = Math.cos(a), sa = Math.sin(a), arm = cylM(0.012, 0.012, 1.4, poleMat, 6);
-      arm.rotation.set(0, -a, Math.PI / 2); add(arm, cy, ca * 1.9, sa * 1.9);
-      if (k !== 3) add(sph(0.12, coreGloss(k % 2 ? '#FC941E' : '#7B43F8')), cy, ca * 1.5, sa * 1.5);
+    // 軌道は細いチューブだけでなく平たい帯。端面を白金、発光線を一列に整理。
+    function coreOrbit(parent, r, width, y, stops, tilt = 0) {
+      const g = new THREE.Group(); g.position.y = y; g.rotation.z = tilt; parent.add(g);
+      const geo = new THREE.CylinderGeometry(r, r, width, 160, 1, true);
+      paint(geo, (x, yy, z) => gradAt(stops, ((Math.atan2(z, x) / TAU + 1) % 1)));
+      const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.24, metalness: 0.15, side: THREE.DoubleSide, emissive: '#FFFFFF', emissiveIntensity: 0.25, envMapIntensity: 0.35 }); mat.onBeforeCompile = coreVColorEmi;
+      coreThemeFns.push(d => { mat.emissiveIntensity = d ? 0.55 : 0.25; });
+      g.add(new THREE.Mesh(geo, mat));
+      ring(r, 0.028, coreGloss('#ECE8FF'), width / 2, g);
+      ring(r, 0.018, em('#D8EFFF'), -width / 2, g);
+      return g;
     }
-    [-1, 1].forEach(sx => {
-      const dir = new THREE.Vector3(sx * 0.5, 0.707, 0.5).normalize(), sh = cylM(0.012, 0.012, 0.2, poleMat, 6);
-      sh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); sh.position.copy(dir.clone().multiplyScalar(R + 0.08).add(C)); core.add(sh);
-      const b = sph(0.08, coreGloss('#FC941E')); b.position.copy(dir.clone().multiplyScalar(R + 0.2).add(C)); core.add(b);
+    const fins = new THREE.Group(); core.add(fins); coreAnim.fins = fins;
+    coreOrbit(fins, 5.55, 0.19, 7.1, ['#FFE4A5', '#FFBD65', '#F590D2', '#ACA4FF', '#85DCFF', '#FFE4A5'], 0.115);
+    coreOrbit(fins, 4.2, 0.11, 7.6, ['#96DEFF', '#D2C4FF', '#ECA1E7', '#96DEFF'], -0.16);
+    ring(5.85, 0.022, em('#D5D9FF'), 7.1, fins);
+
+    // 蓮のクラウン：外側12枚＋内側8枚。全20枚を2 draw callsにまとめる。
+    add(cylM(0.65, 0.24, 0.35, em('#FFCC68')), 8.75);
+    add(cylM(1.48, 0.6, 0.18, coreGloss('#FFF0CD')), 8.96);
+    ring(2.6, 0.035, coreGloss('#C5D1F3'), 9.04);
+    ring(2.64, 0.02, em('#96E7FF'), 9.04);
+    function corePetalGeo() {
+      const pts = [[0,0,0],[-0.5,0.42,0.55],[0.5,0.42,0.55],[0,1.04,1.36],[0,0.55,0.87],[0,0.4,0.29]];
+      const tris = [[0,1,4],[0,4,2],[1,3,4],[4,3,2],[0,5,1],[0,2,5],[1,5,3],[5,2,3]];
+      const pos = [], colors = [], palette = ['#F9B5DC','#A2EAFF','#FFD391','#C5A3F7','#9B70C9','#8379C7','#CF83C3','#7FAFD7'];
+      tris.forEach((tri, i) => { const c = new THREE.Color(palette[i]); tri.forEach(j => { pos.push(...pts[j]); colors.push(c.r,c.g,c.b); }); });
+      const g = new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('color',new THREE.Float32BufferAttribute(colors,3)); g.computeVertexNormals(); return g;
+    }
+    const corePetal = corePetalGeo();
+    // 花びらは両面で表示し、下から見ても裏が消えないようにする。
+    const corePetalMat = coreCrystalMat.clone(); corePetalMat.side = THREE.DoubleSide; corePetalMat.transparent = false; corePetalMat.opacity = 1; corePetalMat.depthWrite = true; corePetalMat.onBeforeCompile = coreVColorEmi;
+    // 外面は青紫の陰、内側は明るい乳白の反射。形の厚みを色と面法線の両方で示す。
+    const coreInnerPetalMat = corePetalMat.clone(); coreInnerPetalMat.color.set('#F0EBFF'); coreInnerPetalMat.roughness=0.22; coreInnerPetalMat.onBeforeCompile=coreVColorEmi;
+    coreThemeFns.push(d => { corePetalMat.emissiveIntensity = d ? 0.38 : 0.12; coreInnerPetalMat.emissiveIntensity=d?0.42:0.21; });
+    instanced(corePetal, corePetalMat, 12, (k, d) => { const a = k / 12 * TAU; d.position.set(Math.sin(a) * 0.75,9.03,Math.cos(a) * 0.75); d.rotation.y=a; });
+    instanced(corePetal, coreInnerPetalMat, 8, (k, d) => { const a = (k + 0.5) / 8 * TAU; d.position.set(Math.sin(a) * 0.22,9.1,Math.cos(a) * 0.22); d.rotation.y=a; d.scale.set(0.7,1.4,0.65); });
+    coreGem(10.0,0.36,0.76);
+    ring(0.72,0.025,em('#FFE29A'),10.55);
+    // 上部の大きなホログラムリングと浮遊ディスプレイで、遠景にも階層を作る。
+    coreOrbit(core,4.9,0.23,11.15,['#91E8FF','#C2B6FF','#F4A2DF','#FFE0A7','#91E8FF']);
+    ring(2.65,0.012,em('#B7E7FF'),11.38);
+    ring(2.35,0.012,em('#B7E7FF'),11.38);
+    // e70はローカルy=10.15を使うため、親を+0.65してクラウンの上に配置。
+    // Torusのrotation.x=PI/2に対するrotation.zは水平面内の回転で、横倒しにはならない。
+    const coreAntMount = new THREE.Group(); coreAntMount.position.y=0.65; core.add(coreAntMount);
+    const ant = ring(1.3,0.023,em('#FFDD83'),10.15,coreAntMount); coreAnim.antenna=ant;
+    coreGem(11.5,0.16,0.3);
+    add(cylM(0.015,0.015,1.2,coreGloss('#D4D6F0'),8),10.87);
+    [-1,1].forEach((s,k)=>{
+      const p = new THREE.Mesh(panelGeo,uiMats[k]); p.scale.set(0.7,0.7,1); p.position.set(s*3.72,10.35,0); p.rotation.y=s*0.25; core.add(p); coreAnim.displays.push({m:p,y:10.35,ph:k*2});
     });
-    const coreCardMat = (() => {
-      const ct = canvasTex(88, 112, false), c = ct.ctx;
-      rr(c, 2, 2, 84, 108, 14); c.fillStyle = '#FEEA08'; c.fill();
-      rr(c, 12, 12, 64, 88, 8); c.fillStyle = '#FFF7FB'; c.fill();
-      rr(c, 20, 22, 22, 30, 6); c.fillStyle = '#F6A8E0'; c.fill();
-      rr(c, 46, 22, 22, 30, 6); c.fillStyle = '#B9A5F7'; c.fill();
-      c.fillStyle = '#C9B2FF'; rr(c, 20, 64, 48, 8, 4); c.fill(); rr(c, 20, 78, 32, 8, 4); c.fill();
-      ct.t.needsUpdate = true; return new THREE.MeshBasicMaterial({ map: ct.t, side: THREE.DoubleSide });
-    })();
-    [[2.0, 7.0, -0.6], [-1.7, 6.8, -1.0]].forEach(([x, y, z], k) => {
-      const g = new THREE.Group(); g.position.set(x, y, z); core.add(g);
-      g.add(cylM(0.008, 0.008, 1.2, poleMat, 6));
-      const b = sph(0.09, coreGloss('#7B43F8')); b.position.y = 0.6; g.add(b);
-      const card = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.28), coreCardMat); card.position.y = -0.74; card.rotation.y = Math.atan2(x, z); g.add(card);
-      coreAnim.displays.push({ m: g, y, ph: 3 + k * 2 });
-    });
-    // 球の近くの3枚。右前の1枚は曲面の水色ガラス（正面図の球の右の大きなパネル）
-    const coreGlassPanelMat = (() => {
-      const ct = canvasTex(128, 72, false), c = ct.ctx;
-      c.fillStyle = '#BDE8FF'; c.fillRect(0, 0, 128, 72);
-      c.fillStyle = 'rgba(255,255,255,0.7)'; for (let k = 1; k < 8; k++) c.fillRect(k * 16 - 1, 6, 2, 60);
-      c.fillRect(0, 0, 128, 4); c.fillRect(0, 68, 128, 4); rr(c, 10, 14, 40, 8, 4); c.fill();
-      ct.t.needsUpdate = true; return new THREE.MeshBasicMaterial({ map: ct.t, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false });
-    })();
-    [[-1.9, 7.5, 0.7], [1.85, 6.7, 0.9], [0.3, 8.0, -1.95]].forEach(([x, y, z], k) => {
-      let p;
-      if (k === 1) { const a = Math.atan2(z, x); p = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.0, 0.55, 12, 1, true, Math.PI / 2 - a - 0.25, 0.5), coreGlassPanelMat); p.position.y = y; }
-      else { p = new THREE.Mesh(panelGeo, uiMats[(k + 1) % 3]); p.scale.setScalar(0.5); p.position.set(x, y, z); p.rotation.y = Math.atan2(x, z); }
-      core.add(p); coreAnim.displays.push({ m: p, y, ph: k * 2 });
-    });
-
-    // 05 サイドフィン：A（オレンジ→マゼンタ）とB（ラベンダー→紫）を交互に、4枚とも同じ回り方で風車の渦に
-    const fins = new THREE.Group(); fins.position.y = 6.55; core.add(fins);
-    // ダークでは頂点色で少し自己発光（灰色に沈まないように）。強さはテーマのフックで切り替え
-    const finA = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, metalness: 0, side: THREE.DoubleSide, envMapIntensity: 0.4, emissive: '#FFFFFF', emissiveIntensity: 0 });
-    finA.onBeforeCompile = s => { s.fragmentShader = s.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance *= vColor;'); };
-    coreThemeFns.push(d => { finA.emissiveIntensity = d ? 0.3 : 0; finA.envMapIntensity = d ? 0.6 : 0.4; });
-    const geoA = crescentGeo(['#FC941E', '#FF5C7A', '#F64FC0']), geoB = crescentGeo(['#D9C8FF', '#A57CF5', '#7B43F8']);
-    const hangRod = new THREE.CylinderGeometry(0.02, 0.02, 0.25, 6), hangCap = new THREE.SphereGeometry(0.09, 16, 12);
-    const ha = 0.22, ht = ha / 1.9, hr = 3.8 - 1.45 * ht - (0.62 * Math.pow(1 - ht, 0.75) + 0.015) / 2, hy = 1 - 2 * ht - 0.07;
-    for (let k = 0; k < 4; k++) {
-      const fg = new THREE.Group(); fg.rotation.y = k * Math.PI / 2 + Math.PI / 4; fins.add(fg);
-      const m = new THREE.Mesh(k % 2 ? geoB : geoA, finA); m.rotation.x = -Math.PI / 2; fg.add(m);
-      // 太い端の下にぶら下がる小さな白いカプセル（シェイプの y はここでは −z）
-      const rod = new THREE.Mesh(hangRod, poleMat); rod.position.set(Math.cos(ha) * hr, hy - 0.12, -Math.sin(ha) * hr); fg.add(rod);
-      const cap = new THREE.Mesh(hangCap, MAT.white); cap.scale.y = 1.4; cap.position.set(Math.cos(ha) * hr, hy - 0.34, -Math.sin(ha) * hr); fg.add(cap);
+    // 遠景に漂う小結晶は3個に抑え、主役の球を隠さない。
+    for(let k=0;k<3;k++){
+      const a=k/3*TAU+0.4, m=new THREE.Mesh(coreGemGeo,coreCrystalMat); m.scale.set(0.07,0.13,0.07); const y=8.0+k*0.18; m.position.set(Math.sin(a)*2.2,y,Math.cos(a)*2.2); core.add(m); coreAnim.bits.push({m,y,ph:k*2.1});
     }
-    coreAnim.fins = fins;
-
-    // 03・02 上部：首→装飾リング（レンズ形）→受け皿とガラスの小ドーム→ガラスのスパイア
-    add(cylM(0.1, 0.12, 0.16, MAT.glass, 16), 8.41);
-    add(cylM(0.05, 0.05, 0.16, MAT.white, 8), 8.41);
-    add(cylM(0.48, 0.1, 0.24, coreGloss('#5B4FE0'), 48), 8.61);
-    add(cylM(0.8, 0.48, 0.1, coreGloss('#EFCF8E'), 64), 8.78);
-    const ly = r => 8.83 + (0.8 - r) / 0.5 * 0.16;
-    const lensG = coreLathe([[0.8, 8.83], [0.66 + E, ly(0.66 + E)], [0.66 - E, ly(0.66 - E)], [0.48 + E, ly(0.48 + E)], [0.48 - E, ly(0.48 - E)], [0.3, 8.99], [0.3, 8.99], [0, 8.99]], 64);
-    paint(lensG, (x, y, z) => { const r = Math.hypot(x, z); return col(r > 0.66 ? '#F64FC0' : r > 0.48 ? '#F5C542' : '#FFF4D6'); });
-    add(new THREE.Mesh(lensG, coreGlossV), 0);
-    add(cylM(0.08, 0.1, 0.08, MAT.white, 16), 9.02);
-    add(cylM(0.46, 0.38, 0.05, coreGloss('#6D62E8'), 48), 9.08);
-    add(new THREE.Mesh(new THREE.SphereGeometry(0.3, 24, 12, 0, TAU, 0, Math.PI / 2), MAT.glass), 9.1);
-    add(sph(0.13, coreGloss('#9B46D6')), 9.24);
-    add(cylM(0.025, 0.1, 1.15, coreSpireMat, 12), 9.975);
-    add(cylM(0.012, 0.012, 1.15, em('#E8F4FF'), 6), 9.975);
-    // 01 アンテナリング：e70 が position.y = 10.15 + … と書くので、親グループを −0.4 ずらして見かけ 9.75 に
-    const coreAntG = new THREE.Group(); coreAntG.position.y = -0.4; core.add(coreAntG);
-    const ant = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.03, 8, 128), em('#FFE14D')); ant.rotation.x = Math.PI / 2; ant.position.y = 10.15; coreAntG.add(ant);
-    coreAnim.antenna = ant;
-    add(sph(0.24, coreGloss('#FC941E')), 10.8);
-    add(coreGlow(PAL.gold, 0.8), 10.8);
-
-    // 浮遊ディスプレイ×12：大きさをばらし、情報リングと球の下端のあいだの高さ（窓の帯を隠さない）に途切れた輪のように（3枚は曲面）
-    const coreDispW = [0.7, 0.5, 0.35, 0.7, 0.45, 0.75, 0.4, 0.6, 0.35, 0.6, 0.5, 0.65];
-    for (let k = 0; k < 12; k++) {
-      const a = k / 12 * TAU + (k % 2 ? 0.1 : -0.06), r = 4.0 + (k % 3) * 0.2, y = [5.6, 5.95, 6.3][k % 3], w = coreDispW[k];
-      let p;
-      if (k % 4 === 1) { p = new THREE.Mesh(new THREE.CylinderGeometry(r, r, w * 0.625, 12, 1, true, Math.PI / 2 - a - (w / r) / 2, w / r), uiMats[k % 3]); p.position.set(0, y, 0); }
-      else { p = new THREE.Mesh(panelGeo, uiMats[k % 3]); p.scale.set(w, w, 1); p.position.set(Math.cos(a) * r, y, Math.sin(a) * r); p.rotation.order = 'YXZ'; p.rotation.set(0.08, Math.PI / 2 - a, 0); }
-      core.add(p); coreAnim.displays.push({ m: p, y, ph: k });
-    }
-    // 小さなかけら：球の上半分の横に3個だけ（紫・オレンジ・シアン）。[色, 方位, 半径, 高さ]
-    [['#7B43F8', 2.35, 1.6, 7.95], ['#FC941E', 3.9, 1.55, 8.25], ['#50CEFD', 0.2, 1.65, 7.7]].forEach(([c, a, r, y], k) => {
-      const m = sph(0.06, coreGloss(c)); m.position.set(Math.cos(a) * r, y, Math.sin(a) * r); core.add(m);
-      coreAnim.bits.push({ m, y, ph: k * 2.1 });
-    });
   }
   buildCore();
   areaThemeHooks.push(() => coreThemeFns.forEach(f => f(!!T.dark)));
-  // 泉のクリスタルの上（世界6.7）からコアの下部ユニットの中まで伸びる光の柱（コアが一番上に揺れても届く）
+  // 泉から浮遊ダイヤを結ぶ細い光。歩行・クリック対象は変更しない。
   const coreBeamY0 = 6.7, coreBeamY1 = CORE_BASE + 0.6 * CORE_S;
-  const coreBeam = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.42, coreBeamY1 - coreBeamY0, 20, 1, true), beamMat);
+  const coreBeam = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.28, coreBeamY1 - coreBeamY0, 20, 1, true), beamMat);
   coreBeam.position.y = (coreBeamY0 + coreBeamY1) / 2; scene.add(coreBeam);
-  // ---- アバター（マスク型） ----------------------------------------------
+  // ---- アバターの表情（住民の人間顔＋マスコットのLED） ---------------------
   // マスクに映る表情（LED）。座標はいつも 256×128 の中で考える。
   // 目の中心は x=70 / x=186（マスク幅の±23%）、目の高さは y30〜100（中心 y66）＝ GEO.face の範囲（共通の約束1）。
   const AV_FACE_RES = isTouch ? 1 : 2;                       // スマホは 256×128、パソコンは 512×256
@@ -2504,28 +2649,65 @@ body.sheet-open #banner{display:none}
       }));
     } else glow(color, 15, () => E.forEach(x => ln(x, 30, x, 100)));   // basic（知らない名前もこれ）
   }
+  // 人の顔は透明な肌上レイヤー。白目・虹彩・まぶた・眉・唇を別々に描き、発光させない。
+  function drawHumanFace(c, expr, color) {
+    const happy = ['smile', 'heart', 'excite'].includes(expr), closed = expr === 'blink' || expr === 'sleep';
+    const iris = color === '#7EEA43' ? '#54735B' : color === '#4CD3FF' ? '#456879' : '#6A4A3C';
+    c.lineCap = c.lineJoin = 'round';
+    [77, 179].forEach((x, i) => {
+      const shut = closed || (expr === 'wink' && i === 1) || expr === 'excite';
+      c.strokeStyle = '#4C3433'; c.lineWidth = 3.5;
+      c.beginPath(); c.moveTo(x - 17, 35 + (expr === 'fire' ? i ? 5 : -3 : 0));
+      c.quadraticCurveTo(x, expr === 'surprise' ? 22 : expr === 'think' && i ? 24 : 28, x + 17, 34 + (expr === 'fire' ? i ? -3 : 5 : 0)); c.stroke();
+      if (shut) {
+        c.lineWidth = 2.8; c.beginPath(); c.moveTo(x - 17, 59);
+        c.quadraticCurveTo(x, happy ? 44 : 68, x + 17, 59); c.stroke();
+      } else {
+        const h = expr === 'surprise' ? 13 : happy ? 9 : 11;
+        c.beginPath(); c.ellipse(x, 58, 18, h, 0, 0, TAU); c.fillStyle = '#FFF7EC'; c.fill();
+        c.save(); c.clip(); c.beginPath(); c.ellipse(x + (expr === 'think' ? 4 : 0), 58, 8.4, 10, 0, 0, TAU); c.fillStyle = iris; c.fill();
+        c.beginPath(); c.ellipse(x + (expr === 'think' ? 4 : 0), 58, 4.1, 7, 0, 0, TAU); c.fillStyle = '#252333'; c.fill();
+        c.beginPath(); c.arc(x - 2, 54, 2.6, 0, TAU); c.fillStyle = '#FFFFFF'; c.fill(); c.restore();
+        c.strokeStyle = '#4A3233'; c.lineWidth = 2.6; c.beginPath(); c.moveTo(x - 18, 58); c.quadraticCurveTo(x, 58 - h * 1.7, x + 18, 58); c.stroke();
+      }
+      const blush = c.createRadialGradient(x, 81, 1, x, 81, 19);
+      blush.addColorStop(0, happy ? 'rgba(216,103,111,.27)' : 'rgba(216,103,111,.12)'); blush.addColorStop(1, 'rgba(216,103,111,0)');
+      c.fillStyle = blush; c.fillRect(x - 20, 67, 40, 28);
+    });
+    c.strokeStyle = 'rgba(145,85,68,.38)'; c.lineWidth = 1.7;
+    c.beginPath(); c.moveTo(123, 82); c.quadraticCurveTo(128, 85, 133, 82); c.stroke();
+    if (expr === 'surprise') {
+      c.beginPath(); c.ellipse(128, 104, 6, 8, 0, 0, TAU); c.fillStyle = '#884C48'; c.fill();
+    } else if (happy || expr === 'wink') {
+      c.beginPath(); c.moveTo(111, 99); c.quadraticCurveTo(128, 106, 145, 99); c.quadraticCurveTo(128, 121, 111, 99);
+      c.fillStyle = '#96514F'; c.fill(); c.strokeStyle = '#FFF6ED'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(115, 102); c.quadraticCurveTo(128, 106, 141, 102); c.stroke();
+    } else {
+      c.strokeStyle = '#AA6965'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(116, 104); c.quadraticCurveTo(128, expr === 'fire' ? 99 : 108, 140, 103); c.stroke();
+      c.strokeStyle = 'rgba(235,160,144,.55)'; c.lineWidth = 2; c.beginPath(); c.moveTo(122, 109); c.lineTo(134, 109); c.stroke();
+    }
+  }
   const faceCache = {};
-  function faceTex(expr, color) {
-    const k = expr === 'heart' ? expr : expr + color;          // ハートは LED の色に関係ないので1枚を共有
+  function faceTex(expr, color, human = false) {
+    const k = (human ? 'human:' : 'led:') + expr + color;
     if (!faceCache[k]) {
-      const ct = canvasTex(256 * AV_FACE_RES, 128 * AV_FACE_RES, true);   // 2のべき乗なのでミップマップを使える（遠くでちらつかない）
-      ct.ctx.scale(AV_FACE_RES, AV_FACE_RES); drawFace(ct.ctx, expr, color, AV_FACE_RES);
+      const ct = canvasTex(256 * AV_FACE_RES, 128 * AV_FACE_RES, true);
+      ct.ctx.scale(AV_FACE_RES, AV_FACE_RES);
+      if (human) drawHumanFace(ct.ctx, expr, color); else drawFace(ct.ctx, expr, color, AV_FACE_RES);
       ct.t.needsUpdate = true; faceCache[k] = ct.t;
     }
     return faceCache[k];
   }
   const iconCache = {};
-  function faceIcon(expr, color) {
-    const k = expr + color;
+  function faceIcon(expr, color, human = true) {
+    const k = expr + color + human;
     if (!iconCache[k]) {
       const c = document.createElement('canvas'); c.width = c.height = 96; const ctx = c.getContext('2d');
-      const g = ctx.createLinearGradient(0, 0, 96, 96); g.addColorStop(0, '#FFFFFF'); g.addColorStop(1, '#E4DCFF');
-      ctx.beginPath(); ctx.arc(48, 48, 47, 0, TAU); ctx.fillStyle = g; ctx.fill();
-      const mg = ctx.createLinearGradient(0, 24, 0, 80); mg.addColorStop(0, '#2A2346'); mg.addColorStop(1, '#121026');
-      ctx.beginPath(); ctx.ellipse(48, 52, 37, 28, 0, 0, TAU); ctx.fillStyle = mg; ctx.fill();
-      ctx.save(); ctx.translate(15.5, 35.5); ctx.scale(65 / 256, 35 / 128); drawFace(ctx, expr, color, 0.3); ctx.restore();
-      ctx.beginPath(); ctx.arc(40, 44, 26, Math.PI * 1.1, Math.PI * 1.45);
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.stroke();   // マスクのつや
+      ctx.fillStyle = '#F1EDFF'; ctx.beginPath(); ctx.arc(48, 48, 47, 0, TAU); ctx.fill();
+      ctx.fillStyle = human ? '#493A42' : '#E4DCFF'; ctx.beginPath(); ctx.ellipse(48, 45, 34, 39, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = human ? '#EAC0A5' : '#1B1631'; ctx.beginPath(); ctx.ellipse(48, 53, 29, 31, 0, 0, TAU); ctx.fill();
+      ctx.save(); ctx.translate(18, 33); ctx.scale(60 / 256, 47 / 128);
+      if (human) drawHumanFace(ctx, expr, color); else drawFace(ctx, expr, color, .3); ctx.restore();
+      if (human) { ctx.fillStyle = '#493A42'; ctx.beginPath(); ctx.moveTo(19, 39); ctx.quadraticCurveTo(25, 6, 60, 18); ctx.quadraticCurveTo(79, 20, 79, 41); ctx.quadraticCurveTo(62, 37, 57, 27); ctx.quadraticCurveTo(39, 41, 19, 39); ctx.fill(); }
       iconCache[k] = c.toDataURL();
     }
     return iconCache[k];
@@ -2626,7 +2808,8 @@ body.sheet-open #banner{display:none}
   const avWingMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, side: THREE.DoubleSide });
   const avGoggleMat = new THREE.MeshPhysicalMaterial({ color: '#BFEFFF', roughness: 0.05, transparent: true, opacity: 0.55, clearcoat: 1 });
   const avUnderMat = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, opacity: 0.72, side: THREE.DoubleSide, roughness: 0.3, depthWrite: false });
-  const avSkinMat = cm('#EFEAFF', 0, { roughness: 0.5 });
+  const AV_SKIN = ['#E7B697', '#D49A78', '#F1C6AA', '#BA8061'];
+  const avHairMat = cm('#FFFFFF', 0, { vertexColors: true, roughness: 0.68, metalness: 0 });
   const avPantsMat = cm('#34313F', 0, { roughness: 0.85 });
   const avSoleMat = cm('#FFFFFF', 0, { vertexColors: true, roughness: 0.45 });
   const avVCMat = cm('#FFFFFF', 0, { vertexColors: true, roughness: 0.3 });
@@ -2701,7 +2884,46 @@ body.sheet-open #banner{display:none}
     new THREE.Color(y < -0.07 ? '#E9E3FF' : (Math.abs(x) > 0.12 && y < 0.04 && z < 0.05) ? PAL.yellow : '#FFFFFF')));
   const avShoeTopGeo = () => G('avShoeTop', () => paint(new THREE.CylinderGeometry(0.1, 0.125, 0.2, 16, 4), (x, y) => new THREE.Color(y > 0.04 ? '#7A3CF5' : '#FFFFFF')));
 
-  // ---- 頭（ヘルメット・マスク・イヤーユニット・アンテナ・ヘッドパーツ） ----
+  // 人型の頭は顎を絞った卵形。耳・鼻は同じジオメトリにまとめ、髪も一体で共有する。
+  function avHumanHeadGeo() {
+    return G('avHumanHead3', () => {
+      const g = new THREE.SphereGeometry(.46, 28, 20), p = g.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        const y = p.getY(i), jaw = 1 - Math.max(0, -y / .46) * .16;
+        p.setXYZ(i, p.getX(i) * .83 * jaw, y, p.getZ(i) * .78);
+      }
+      g.computeVertexNormals();
+      return objMerge([[g, '#FFFFFF', objMat4(0, 0, 0, 0, 0, 0, 1)],
+        ...[-1, 1].map(sign => [sphG(.1, 12, 10), '#FFFFFF', objMat4(sign * .366, -.025, .015, 0, 0, sign * .1, .55, 1, .65)]),
+        [sphG(.058, 12, 10), '#FFFFFF', objMat4(0, -.065, .369, .18, 0, 0, .65, 1.3, .85)]]);
+    });
+  }
+  function avHumanHairGeo(type) {
+    return G('avHumanHair3' + type, () => {
+      const colors = { normal: ['#352D35', '#514049'], slim: ['#C5C1D3', '#E7E0E5'], wide: ['#322B29', '#564138'], dress: ['#AD647E', '#D990A6'] };
+      const [base, light] = colors[type] || colors.normal, long = type === 'dress';
+      const cap = new THREE.SphereGeometry(.47, 24, 12, 0, TAU, 0, 1), p = cap.attributes.position, uv = cap.attributes.uv;
+      for (let i = 0; i < p.count; i++) {
+        const phi = uv.getX(i) * TAU, front = Math.max(0, Math.sin(phi));
+        const theta = (1 - uv.getY(i)) * ((long ? 2.0 : 1.82) - front * (long ? .87 : .69));
+        p.setXYZ(i, -.47 * Math.cos(phi) * Math.sin(theta), .47 * Math.cos(theta), .47 * Math.sin(phi) * Math.sin(theta));
+      }
+      cap.computeVertexNormals();
+      const a = [[cap, base, objMat4(0, .045, -.014, 0, 0, 0, .88, 1, .86)]];
+      // 斜めに重なる前髪と側頭部。球を並べた冠にせず、細長い房が額の輪郭をつくる。
+      for (let i = 0; i < 7; i++) {
+        const x = -.29 + i * .092, y = .265 + .045 * Math.sin(i * 1.7);
+        a.push([sphG(.1, 12, 10), i % 3 === 0 ? light : base, objMat4(x, y, .283 - Math.abs(x) * .18, -.24, -.12, -.44 + i * .045, .67, 1.8, .6)]);
+      }
+      [-1, 1].forEach(sign => {
+        a.push([sphG(.1, 12, 10), base, objMat4(sign * .35, long ? -.12 : .06, .015, -.18, 0, sign * -.10, .72, long ? 3.8 : 1.85, 1.25)]);
+        if (long) a.push([sphG(.1, 12, 10), light, objMat4(sign * .27, -.30, -.20, -.18, 0, sign * -.08, .85, 3.8, 1.3)]);
+      });
+      return objMerge(a);
+    });
+  }
+
+  // ---- 頭（住民の人型ヘッド／マスコットのマスク＋共通アクセサリー） ----
   function avHead(q) {
     const { look, b, A, parts, mesh, grp } = q, mascot = q.type === 'mascot', mod = look.mod;
     const h = grp(0, b.headY, 0); h.scale.setScalar(b.HS);
@@ -2710,29 +2932,28 @@ body.sheet-open #banner{display:none}
       mesh(G('avMBody2c', () => paint(avLathe('avMBody2', [[0, -0.5], [0.26, -0.49], [0.38, -0.42], [0.43, -0.26], [0.44, -0.06], [0.42, 0.12], [0.37, 0.28], [0.27, 0.41], [0.14, 0.48], [0, 0.5]], 32),
         (x, y) => avUnderTint(y + 0.5, '#DCD3F7', '#F0ECFF'))), avShellMat, 0, 0, 0, h);
     } else {
-      mesh(avShellGeo(), avShellMat, 0, 0, 0, h).scale.set(1.08, 0.95, 1.0);
-      const capG = grp(0, 0, 0, h); capG.scale.set(1.08, 0.95, 1.0);
-      const cap = mesh(GEO.cap, gm('#F2EDFF'), 0, 0.015, -0.02, capG); cap.rotation.x = -0.62;
-      // 縁: 0.384 = 0.475×sin54°、0.279 = 0.475×cos54°。前はてっぺん近く（y≈0.45）、後ろは後頭部の真ん中（y≈0）を通る
-      const rim = mesh(G('avCapRim2', () => new THREE.TorusGeometry(0.384, 0.02, 8, 56)), A, 0, 0.279, 0, cap); rim.rotation.x = Math.PI / 2;
+      mesh(avHumanHeadGeo(), q.skin, 0, 0, 0, h);
+      mesh(avHumanHairGeo(q.type), avHairMat, 0, 0, 0, h);
     }
     // マスク（visor）と表情（face）は同じ位置・同じ倍率。
     // マスコットは体の上から3割あたり。体が丸く前へ張り出すので、少し前・大きめにして見える範囲を幅6割×高さ3割弱にする
-    const vp = mascot ? [0, 0.16, 0.29] : [0, -0.03, 0.28], vs = mascot ? [0.66, 0.5, 0.42] : [1.06, 0.84, 0.62];
-    mesh(sphG(0.37, 28, 18), avVisorMat, vp[0], vp[1], vp[2], h).scale.set(vs[0], vs[1], vs[2]);
-    const fm = new THREE.MeshBasicMaterial({ map: faceTex('basic', look.led), transparent: true, depthWrite: false });
+    const vp = mascot ? [0, 0.16, 0.29] : [0, -.012, .012], vs = mascot ? [0.66, 0.5, 0.42] : [.99, 1, .99];
+    if (mascot) mesh(sphG(0.37, 28, 18), avVisorMat, vp[0], vp[1], vp[2], h).scale.set(vs[0], vs[1], vs[2]);
+    const fm = mascot
+      ? new THREE.MeshBasicMaterial({ map: faceTex('basic', look.led), transparent: true, depthWrite: false })
+      : new THREE.MeshStandardMaterial({ map: faceTex('basic', look.led, true), transparent: true, depthWrite: false, roughness: .95, polygonOffset: true, polygonOffsetFactor: -1 });
     const face = mesh(GEO.face, fm, vp[0], vp[1], vp[2], h); face.scale.set(vs[0], vs[1], vs[2]);
     parts.head = h; parts.faceMat = fm; parts.face = face; parts.faceSY = vs[1];
     // イヤーユニット: 白い円筒（ふたは黄色）＋虹色の太いリング。ヘッドホンのときは ×1.3、マスコットは小さなつまみ（×0.62）
     const ek = (mod === 'phones' ? 1.3 : 1) * (mascot ? 0.62 : 1), ex = mascot ? 0.41 : 0.5, ey = mascot ? 0.15 : -0.02;
     const earMats = avMat('earMats2', () => [avShellMat, cm(PAL.yellow, 0.25), cm(PAL.yellow, 0.25)]);
-    [-1, 1].forEach(s2 => {
+    if (mascot || mod === 'phones') [-1, 1].forEach(s2 => {
       const e = mesh(avEarGeo(), earMats, s2 * ex, ey, 0, h); e.rotation.z = Math.PI / 2; e.scale.setScalar(ek);
       const r = mesh(avEarRingGeo(), MAT.glow, s2 * (ex + 0.065 * ek), ey, 0, h); r.rotation.y = Math.PI / 2; r.scale.setScalar(ek);
       parts.earRings.push(r);
     });
     // アンテナ（マスコットのうさ耳のときは作らない）
-    if (!(mascot && mod === 'bunny')) {
+    if (mascot && mod !== 'bunny') {
       const an = grp(0, 0.425, 0, h);
       mesh(GEO.stick, avStickMat, 0, 0.12, 0, an);
       mesh(avTipGeo(), MAT.glow, 0, 0.25, 0, an);
@@ -2790,7 +3011,7 @@ body.sheet-open #banner{display:none}
     });
     const col = mesh(colGeo, avClothVCMat, 0, b.sh + 0.09, 0); col.rotation.x = Math.PI / 2; col.scale.set(1, 0.85, 1);
     mesh(sphG(0.26, 16, 10), H, 0, b.sh + 0.13, -0.17).scale.set(1.3, 0.8, 0.85);     // 首の後ろにたまったフード
-    mesh(cylG(0.06, 0.075, 0.2, 10), avSkinMat, 0, b.sh + 0.15, 0);                    // 首
+    mesh(cylG(0.06, 0.075, 0.2, 10), q.skin, 0, b.sh + 0.15, 0);                    // 首
     const dg = grp(0, 0, 0); dg.rotation.y = 0.35;                                     // 左胸のディスク（胴の丸みに沿わせる）
     const dm = avDiscMat(look.accent, look.led);
     mesh(GEO.badge, [A, dm, dm], 0, b.sh - 0.2, tw * 0.98 * 0.8 + 0.015, dg).rotation.x = Math.PI / 2;
@@ -2803,8 +3024,8 @@ body.sheet-open #banner{display:none}
     mesh(cylG(0.2, 0.23, 0.5, 18), cm(look.hoodie, 0, { roughness: 0.5, envMapIntensity: AV_CLOTH_ENV }), 0, 1.5, 0).scale.z = 0.8;
     const band = mesh(G('avBand', () => new THREE.TorusGeometry(0.205, 0.035, 8, 24)), A, 0, 1.68, 0);
     band.rotation.x = Math.PI / 2; band.scale.set(1, 0.8, 1);
-    mesh(sphG(0.22, 16, 8), avSkinMat, 0, 1.75, 0).scale.set(1, 0.4, 0.8);
-    mesh(cylG(0.06, 0.075, 0.2, 10), avSkinMat, 0, 1.9, 0);
+    mesh(sphG(0.22, 16, 8), q.skin, 0, 1.75, 0).scale.set(1, 0.4, 0.8);
+    mesh(cylG(0.06, 0.075, 0.2, 10), q.skin, 0, 1.9, 0);
     // 花びらのスカート: 真ん中をふくらませ、裾を8枚の丸い花びらに（縦の分割は3のまま。4以上だと持ち上げた裾が上の段を越えて折れる）
     const petal = G('avPetal2', () => {
       const g = new THREE.CylinderGeometry(0.22, 0.6, 0.62, 64, 3, true), p = g.attributes.position;
@@ -2828,8 +3049,8 @@ body.sheet-open #banner{display:none}
     [-1, 1].forEach(s => {
       const ag = grp(s * b.armX, b.armY, 0); ag.rotation.z = s * b.armZ;
       if (dress) {
-        mesh(cylG(r0, r1, len, 10), avSkinMat, 0, -len / 2, 0, ag);
-        mesh(sphG(0.06, 12, 10), avSkinMat, 0, -len + 0.02, 0, ag);
+        mesh(cylG(r0, r1, len, 10), q.skin, 0, -len / 2, 0, ag);
+        mesh(sphG(0.06, 12, 10), q.skin, 0, -len + 0.02, 0, ag);
       } else {
         // ベルスリーブ: 肩は細く、袖口でぐっと開く。点は袖口（下）→ 肩（上）の順。y=0 が肩。
         // テクスチャの縦は長さの割合にそろえる（Lathe の uv.y は点の番号の順なので、そのままだと袖口の3色ラインが細くなる）
@@ -2840,7 +3061,7 @@ body.sheet-open #banner{display:none}
           return g;
         });
         mesh(slvGeo, sm, 0, 0, 0, ag);
-        mesh(sphG(0.075, 12, 10), avSkinMat, 0, -(len + 0.01), 0.02, ag).scale.set(0.95, 1.25, 0.85);   // 手は袖口からのぞく
+        mesh(sphG(0.075, 12, 10), q.skin, 0, -(len + 0.01), 0.02, ag).scale.set(0.95, 1.25, 0.85);   // 手は袖口からのぞく
       }
       parts.arms.push(ag);
     });
@@ -2858,9 +3079,9 @@ body.sheet-open #banner{display:none}
         mesh(G('avPrint', () => new THREE.CylinderGeometry(0.272, 0.272, 0.24, 12, 1, true, -0.45, 0.9)), pm, 0, -0.42, 0, lg).rotation.y = s * 0.5;
       } else {
         // スリムはハイカットのブーツの上から黒いソックスがひざまで見える
-        if (slim) mesh(G('avLegSlim2', () => paint(new THREE.CylinderGeometry(0.05, 0.045, L, 10, 8), (x, y) => new THREE.Color(y < 0.22 ? '#2E2B3A' : '#EFEAFF'))),
+        if (slim) mesh(G('avLegSlim3' + q.skinColor, () => paint(new THREE.CylinderGeometry(0.05, 0.045, L, 10, 8), (x, y) => new THREE.Color(y < 0.22 ? '#2E2B3A' : q.skinColor))),
           cm('#FFFFFF', 0, { vertexColors: true, roughness: 0.6 }), 0, -0.2 - L / 2, 0, lg);
-        else mesh(cylG(0.05, 0.045, L, 10), avSkinMat, 0, -0.2 - L / 2, 0, lg);
+        else mesh(cylG(0.05, 0.045, L, 10), q.skin, 0, -0.2 - L / 2, 0, lg);
         if (type === 'normal') {
           // まっすぐ下がる幅広のひざ丈ショーツ（地面から 0.55〜1.19）。裾を少し外へ開いて、左右の裾の間にすき間を作る
           const sh = mesh(avLathe('avShorts', [[0.175, -0.5], [0.205, -0.47], [0.218, -0.3], [0.21, -0.1], [0.185, 0.06], [0.12, 0.14]], 18), avShortsMat, 0, 0, 0, lg);
@@ -2928,7 +3149,10 @@ body.sheet-open #banner{display:none}
     };
     const mesh = (geo, mat, x, y, z, parent) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); (parent || pivot).add(m); return m; };
     const grp = (x, y, z, parent) => { const o = new THREE.Group(); o.position.set(x, y, z); (parent || pivot).add(o); return o; };
-    const q = { look, b, type, A, parts, mesh, grp };
+    const skinIndex = [...(look.accent || '')].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_SKIN.length;
+    const skinColor = AV_SKIN[skinIndex], skin = avMat('skin:' + skinColor, () => cm(skinColor, 0, { roughness: .82 }));
+    const q = { look, b, type, A, parts, mesh, grp, skin, skinColor };
+    parts.human = !mascot;
     if (mascot) avMascot(q);
     else {
       if (type === 'dress') avDress(q); else avTorso(q);
@@ -3051,6 +3275,7 @@ body.sheet-open #banner{display:none}
 
   // ---- エリアの作り込み ----------------------------------------------------
   const areaUpdates = [];
+  areaUpdates.push(() => { areaLeafTime.value = time; areaLeafMotion.value = reduceMotion ? 0 : 1; });
   const nearZone = (i, r) => Math.hypot(player.x - ZONES[i].cx, player.z - ZONES[i].cz) < r;
   const pad3 = n => String(n).padStart(3, '0');
   function boardFrame(ctx, W, H, color, kicker, emb) {
@@ -3466,11 +3691,13 @@ body.sheet-open #banner{display:none}
   {
     const z = ZONES[PARK], g = z.g, gd = z.areaDetail;
     const fi = new THREE.Group(); fi.position.set(5, 9.6, -8.4); g.add(fi);
-    fi.add(cyl(2.8, 2.7, 0.8, MAT.white, 40));
-    const frim = new THREE.Mesh(rainbowTorus(2.85, 0.12, 80), MAT.glow); frim.rotation.x = Math.PI / 2; frim.position.y = 0.32; fi.add(frim);
-    const fcone = cyl(2.7, 0.5, 2.2, MAT.lilac, 40); fcone.position.y = -1.5; fi.add(fcone);
-    const ftip = new THREE.Mesh(sphG(0.45, 16, 12), gm(PAL.yellow)); ftip.position.y = -2.8; fi.add(ftip);
-    areaParkGrove(fi, [{ x: 0, y: 0.4, z: 0, ry: 0.6, s: 0.7 }]);   // 浮き島の桜（公園の木と同じ作りを0.7倍）
+    fi.add(cyl(3.8, 3.7, 0.8, areaBldShell, 64));
+    const frim = new THREE.Mesh(rainbowTorus(3.8, 0.065, 96), MAT.glow); frim.rotation.x = Math.PI / 2; frim.position.y = 0.26; fi.add(frim);
+    const fcone = new THREE.Mesh(new THREE.LatheGeometry([new THREE.Vector2(0.48, -3.65), new THREE.Vector2(1.0, -2.6), new THREE.Vector2(2.6, -1.5), new THREE.Vector2(3.7, -0.4)], 48), areaBldShell); fi.add(fcone);
+    [1.4, 2.6].forEach((r, k) => { const collar = new THREE.Mesh(new THREE.TorusGeometry(r, 0.04, 6, 64), gm(k ? '#9ECDF2' : PAL.gold)); collar.rotation.x = Math.PI / 2; collar.position.y = k ? -1.5 : -2.3; fi.add(collar); });
+    const ftip = new THREE.Mesh(new THREE.OctahedronGeometry(0.42, 0), gm(PAL.yellow)); ftip.scale.y = 1.5; ftip.position.y = -3.8; fi.add(ftip);
+    areaGardenPlanter(fi, 0, -0.4, 1.2, 0.4);
+    areaParkGrove(fi, [{ x: 0, y: 0.4, z: -0.4, ry: 0.6, s: 0.85 }]);
     spinners.push({ m: fi, sp: 0, bob: true, y: 9.6, ph: 0, amp: 0.8 });
     const wfC = canvasTex(64, 256, false);
     for (let k = 0; k < 26; k++) {
@@ -3481,32 +3708,60 @@ body.sheet-open #banner{display:none}
       wfC.ctx.fillStyle = gr2; wfC.ctx.fillRect(x, y - 256, w, h);
     }
     wfC.t.wrapS = wfC.t.wrapT = THREE.RepeatWrapping; wfC.t.needsUpdate = true;
+    // UVを流しても下端のフェードは動かないよう、幾何の高さから透過率を作る。
+    const areaFallMaterial = (opts, height) => {
+      const mat = new THREE.MeshBasicMaterial(Object.assign({ transparent: true, depthWrite: false, side: THREE.DoubleSide }, opts));
+      mat.onBeforeCompile = s => {
+        s.vertexShader = 'varying float areaFallFade;\n' + s.vertexShader;
+        s.vertexShader = s.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nareaFallFade = (position.y + ' + (height / 2).toFixed(3) + ') / ' + height.toFixed(3) + ';');
+        s.fragmentShader = 'varying float areaFallFade;\n' + s.fragmentShader;
+        s.fragmentShader = s.fragmentShader.replace('#include <alphatest_fragment>', 'diffuseColor.a *= smoothstep(0.0, 0.22, areaFallFade);\n#include <alphatest_fragment>');
+      };
+      mat.customProgramCacheKey = () => 'arca-fall-fade-' + height;
+      return mat;
+    };
     // 島の奥の縁から雲へ落ちる大滝（テクスチャは浮き島の滝の複製。repeat を変える前に複製する）
     const bigTex = wfC.t.clone(); bigTex.needsUpdate = true; bigTex.repeat.set(6, 3.5);   // 長さ34に合わせて縦の繰り返しを増やす
+    const areaWaterDetails = [];
     wfC.t.repeat.x = 2;
     // 浮き島の滝：fi の子にして一緒に揺れる。上面の縁（fi の y=0.4）から池（y≈0.2）まで、角度0（+z）を中心にした曲面
-    const back = new THREE.Mesh(new THREE.CylinderGeometry(2.7, 2.7, 9.8, 20, 1, true, -0.42, 0.84), new THREE.MeshBasicMaterial({ color: '#9FE6FF', transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide }));
+    const back = new THREE.Mesh(new THREE.CylinderGeometry(3.71, 3.76, 9.8, 20, 8, true, -0.54, 1.08), areaFallMaterial({ color: '#76CAEF', opacity: 0.27 }, 9.8));
     back.position.y = -4.5; fi.add(back);
-    const wf = new THREE.Mesh(new THREE.CylinderGeometry(2.86, 2.86, 9.8, 20, 1, true, -0.42, 0.84), new THREE.MeshBasicMaterial({ map: wfC.t, color: '#DDF7FF', transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+    const wf = new THREE.Mesh(new THREE.CylinderGeometry(3.82, 3.9, 9.8, 20, 8, true, -0.54, 1.08), areaFallMaterial({ map: wfC.t, color: '#DDF7FF', opacity: 0.88 }, 9.8));
     wf.position.y = -4.5; fi.add(wf);
+    areaWaterDetails.push(wf);
     {
       const BW0 = Math.PI - 0.17, BWL = 0.34, BR = 17.5;   // 幅約6m、島の真後ろ（z≈-17.5）。A の丸い縁（半径17.38まで）の外側
       // 長さ34（上端 y≈-0.1、下端 y≈-34）。下端はリードの雲海（y -42〜-32）としぶきの雲の中に消える
-      const bigBack = new THREE.Mesh(new THREE.CylinderGeometry(BR - 0.1, BR - 0.1, 34, 12, 1, true, BW0, BWL), new THREE.MeshBasicMaterial({ color: '#9FE6FF', transparent: true, opacity: 0.25, depthWrite: false, side: THREE.DoubleSide }));
+      const bigBack = new THREE.Mesh(new THREE.CylinderGeometry(BR - 0.1, BR - 0.1, 34, 12, 8, true, BW0, BWL), areaFallMaterial({ color: '#8DDAF7', opacity: 0.25 }, 34));
       bigBack.position.y = -17.1; g.add(bigBack);
-      const big = new THREE.Mesh(new THREE.CylinderGeometry(BR, BR, 34, 12, 1, true, BW0, BWL), new THREE.MeshBasicMaterial({ map: bigTex, color: '#E6F8FF', transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }));
+      const big = new THREE.Mesh(new THREE.CylinderGeometry(BR, BR, 34, 12, 8, true, BW0, BWL), areaFallMaterial({ map: bigTex, color: '#E6F8FF', opacity: 0.9 }, 34));
       big.position.y = -17.1; g.add(big);
+      areaWaterDetails.push(big);
       const lip = new THREE.Mesh(new THREE.CylinderGeometry(BR + 0.05, BR + 0.05, 0.12, 12, 1, true, BW0, BWL), em('#BFF3FF')); lip.position.y = -0.05; g.add(lip);
       const spray = glowSprite('#FFFFFF', 12); spray.position.set(0, -31, -BR); g.add(spray);
       [[0, -30, 40, 16], [-5, -27, 24, 10], [5, -27, 24, 10]].forEach(([x, y, w, h]) => { const puff = new THREE.Sprite(cloudMat); puff.scale.set(w, h, 1); puff.position.set(x, y, -BR); g.add(puff); });
     }
-    const mist = glowSprite('#FFFFFF', 3.6); mist.position.set(5, 0.9, -5.4); gd.add(mist);
+    const mist = glowSprite('#FFFFFF', 3.6); mist.position.set(5, 0.9, -4.7); gd.add(mist);
     const ripple = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.05, 6, 40), new THREE.MeshBasicMaterial({ color: '#FFFFFF', transparent: true, opacity: 0.8, depthWrite: false }));
-    ripple.rotation.x = Math.PI / 2; ripple.position.set(5, 0.14, -5.4); gd.add(ripple);
+    ripple.rotation.x = Math.PI / 2; ripple.position.set(5, 0.14, -4.7); gd.add(ripple);
+    const areaSprayN = 36, areaSprayPos = new Float32Array(areaSprayN * 3);
+    const areaSprayGeo = new THREE.BufferGeometry(); areaSprayGeo.setAttribute('position', new THREE.BufferAttribute(areaSprayPos, 3));
+    const areaSpray = new THREE.Points(areaSprayGeo, new THREE.PointsMaterial({ map: glowTex, color: '#E0F8FF', size: 0.16, transparent: true, opacity: 0.65, depthWrite: false })); areaSpray.frustumCulled = false; gd.add(areaSpray);
     areaUpdates.push(dt => {
+      const near = Math.hypot(camera.position.x - z.cx, camera.position.z - z.cz) < 90;
+      areaWaterDetails.forEach(m => { m.visible = near; }); areaSpray.visible = near;
+      if (!near) return; // 遠景では青い水幕だけ残し、細い流線・飛沫を更新しない。
       wfC.t.offset.y += dt * (reduceMotion ? 0.2 : 1.1); bigTex.offset.y = wfC.t.offset.y;
       const k = (time * 0.6) % 1; ripple.scale.setScalar(1 + k * 1.6); ripple.material.opacity = 0.8 * (1 - k);
       mist.material.opacity = 0.55 + Math.sin(time * 3) * 0.15;
+      for (let j = 0; j < areaSprayN; j++) {
+        const p = ((reduceMotion ? 0 : time * 0.6) + j / areaSprayN) % 1, a = j * 2.399963;
+        areaSprayPos[j * 3] = 5 + Math.cos(a) * (0.15 + p * 1.6);
+        areaSprayPos[j * 3 + 1] = 0.2 + Math.sin(p * Math.PI) * 0.7;
+        areaSprayPos[j * 3 + 2] = -4.7 + Math.sin(a) * (0.15 + p * 1.2);
+      }
+      areaSprayGeo.attributes.position.needsUpdate = true;
     });
     const petalTex = (() => {
       const ct = canvasTex(32, 32, false), gr = ct.ctx.createRadialGradient(16, 16, 2, 16, 16, 14);
@@ -3601,7 +3856,12 @@ body.sheet-open #banner{display:none}
     const spkA = new THREE.ExtrudeGeometry(areaRoundRect(1.1, 1.3, 0.28), { depth: 0.9, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.04, bevelSegments: 2, curveSegments: 6 }); spkA.translate(0, 0.65, -0.45);
     const spkB = new THREE.ExtrudeGeometry(areaRoundRect(0.9, 1.0, 0.24), { depth: 0.8, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.04, bevelSegments: 2, curveSegments: 6 }); spkB.translate(0, 0.5, -0.4);
     const deco = {
-      park: s => areaParkGrove(s.g, [{ x: 0, z: 0, ry: rand(0, TAU), s: 0.8 }]),
+      park: s => {
+        areaGardenPlanter(s.g, 0, 0, 1.05);
+        areaParkGrove(s.g, [{ x: 0, z: 0, ry: rand(0, TAU), s: 0.8 }]);
+        const rim = new THREE.Mesh(new THREE.TorusGeometry(Math.min(s.r - 0.2, 2.65), 0.035, 6, 64), gm('#9BD6F4'));
+        rim.rotation.x = Math.PI / 2; rim.position.y = 0.035; s.g.add(rim);
+      },
       shop: (s, z, k) => {
         if (s.pos.z < 0) {   // 奥の2つ：パラソルとテーブル
           const pole = cyl(0.05, 0.05, 2.2, MAT.white, 8); pole.position.y = 1.1;
@@ -3736,21 +3996,23 @@ body.sheet-open #banner{display:none}
     }
     const sit = av.sitT > 0 && !mascot, run = av.speed > 8;
     if (av.moving) av.phase += dt * av.speed * (mascot ? 1.25 : 1.9);
-    const amp = av.moving ? Math.min(1, av.speed / 5) : 0, sw = Math.sin(av.phase) * amp;
+    const targetAmp = av.moving ? Math.min(1, av.speed / 5) : 0;
+    av.avStride = (av.avStride || 0) + (targetAmp - (av.avStride || 0)) * Math.min(1, dt * 9);
+    const amp = av.avStride, sw = Math.sin(av.phase) * amp;
     // 袖が大きい（ベルスリーブ）ので腕の前後の振りは小さめ。走るときは外へ開いて体に当たらないようにする
-    const legA = mascot ? 0.35 : run ? 0.85 : 0.62, armA = run ? 0.55 : 0.32;
+    const legA = mascot ? 0.35 : run ? 0.62 : 0.40, armA = run ? 0.44 : 0.25;
     // 上下: 歩きは脚がそろった瞬間が高い・走りとマスコットは跳ねる
     const bob = av.moving
-      ? (mascot ? Math.abs(Math.sin(av.phase)) * 0.22 : run ? Math.abs(Math.sin(av.phase)) * 0.1 : Math.abs(Math.cos(av.phase)) * 0.06) * amp
-      : Math.sin(time * 2.2 + av.phase) * 0.012 * RM;
+      ? (mascot ? Math.abs(Math.sin(av.phase)) * 0.22 : run ? Math.abs(Math.sin(av.phase)) * 0.055 : Math.abs(Math.cos(av.phase)) * 0.022) * amp
+      : Math.sin(time * 1.65 + av.phase) * 0.005 * RM;
     // マスコットの伸び縮み（高いところで縦に伸び、着地でつぶれる。止まっているときは呼吸）
     const sq = mascot ? (av.moving ? -Math.cos(av.phase * 2) * 0.08 * amp * RM : Math.sin(time * 2.2 + av.phase) * 0.025 * RM) : 0;
     // NPC の待機のしぐさ（ぴょんぴょん・首をかしげる・伸び）。プレイヤーと、ほかの動きの最中は出さない
     const busy = av.moving || av.sitT > 0 || av.cheer || av.waveT > 0 || av.penT > 0 || av.y > 0;
     if (!av.isPlayer && !busy && !(av.exprT > 0) && !av.avFid) {
-      av.avFidT = (av.avFidT == null ? rand(4, 10) : av.avFidT) - dt;
+      av.avFidT = (av.avFidT == null ? rand(7, 14) : av.avFidT) - dt;
       if (av.avFidT < 0) {
-        av.avFid = pick(['hop', 'tilt', 'stretch']); av.avFidP = 0; av.avFidT = rand(7, 14);
+        av.avFid = pick(mascot ? ['hop', 'tilt', 'stretch'] : ['tilt', 'stretch']); av.avFidP = 0; av.avFidT = rand(7, 14);
         setExpr(av, AV_FID_FACE[av.avFid], AV_FID[av.avFid]);
       }
     }
@@ -3785,15 +4047,17 @@ body.sheet-open #banner{display:none}
                             : s * (armZ + (av.moving ? 0.05 * amp : 0) + (run ? 0.12 * amp : 0));
       a.rotation.z += s * (0.35 * airK + (1.3 * fStr + 0.3 * fHop) * RM);                     // 空中・伸び・ぴょんぴょんで腕を開く
     });
-    if (av.waveT > 0) { av.waveT -= dt; m.arms[1].rotation.x = -0.2; m.arms[1].rotation.z = 2.5 + Math.sin(time * 14) * 0.35; }
+    if (av.waveT > 0) { av.waveT -= dt; m.arms[1].rotation.x = -0.2; m.arms[1].rotation.z = 2.5 + Math.sin(time * (mascot ? 14 : 7)) * (mascot ? .35 : .22); }
     if (av.penT > 0) { av.penT -= dt; m.arms[1].rotation.x = -2.55 + Math.sin(time * 7 + av.phase) * 0.45; m.arms[1].rotation.z = 0.3; }
     m.pen.visible = av.penT > 0;
-    m.pivot.position.y = av.y + bob + sitY + fHop * 0.12 * RM;
+    // 脚が前後へ開くと骨盤を少し下げ、足底が床から一斉に浮かないようにする。
+    const strideDrop = !mascot && !sit ? (m.hipY || 1) * (1 - Math.cos(sw * legA)) : 0;
+    m.pivot.position.y = av.y + bob + sitY - strideDrop + fHop * 0.12 * RM;
     // 体: 前傾（足元が軸。反動は目標に足す）・腰のひねり・曲がるときの傾き・待っているときの重心の移動
     const k8 = Math.min(1, dt * 8);
-    m.pivot.rotation.x += ((av.moving && !sit ? (run ? 0.13 : 0.06) * amp : 0) + 0.1 * kick - 0.05 * fStr * RM - m.pivot.rotation.x) * k8;
-    m.pivot.rotation.y = av.moving && !mascot ? sw * 0.09 * RM : 0;
-    m.pivot.rotation.z = (!av.moving ? Math.sin(time * 0.7 + av.phase) * 0.02 * RM : 0) + (av.avLean - 0.04 * fTilt) * RM;
+    m.pivot.rotation.x += ((av.moving && !sit ? (run ? 0.13 : 0.06) * amp : 0) + (mascot ? .1 : .035) * kick - 0.05 * fStr * RM - m.pivot.rotation.x) * k8;
+    m.pivot.rotation.y = av.moving && !mascot ? sw * 0.055 * RM : 0;
+    m.pivot.rotation.z = (!av.moving ? Math.sin(time * 0.7 + av.phase) * (mascot ? .02 : .009) * RM : 0) + (av.avLean - 0.04 * fTilt) * RM;
     // よそ見（待っているときだけ。ゆっくりなので RM は掛けない）
     if (!av.moving && !(av.sitT > 0)) {
       av.avLookT = (av.avLookT == null ? rand(1, 4) : av.avLookT) - dt;
@@ -3804,8 +4068,8 @@ body.sheet-open #banner{display:none}
     if (m.head) {
       m.head.rotation.x = -m.pivot.rotation.x * 0.7 + (av.moving ? Math.sin(av.phase * 2 + 0.6) * 0.035 * amp * RM : 0) - 0.18 * fStr * RM;
       m.head.rotation.y = -m.pivot.rotation.y * 0.8 + av.avLook;
-      m.head.rotation.z = (Math.sin(time * 1.3 + av.phase) * 0.05 + (av.bubble ? Math.sin(time * 9) * 0.03 : 0) - av.avLean * 0.4 + 0.28 * fTilt) * RM;
-      if (m.headY != null && !mascot) m.head.position.y = m.headY + (av.moving ? Math.sin(av.phase * 2 - 0.9) * 0.025 * amp * RM : 0);
+      m.head.rotation.z = (Math.sin(time * 1.3 + av.phase) * (mascot ? .05 : .018) + (av.bubble ? Math.sin(time * 9) * 0.03 : 0) - av.avLean * 0.4 + 0.28 * fTilt) * RM;
+      if (m.headY != null && !mascot) m.head.position.y = m.headY + (av.moving ? Math.sin(av.phase * 2 - 0.9) * 0.009 * amp * RM : 0);
     }
     // 揺れる部品（A が作ったときだけ）
     const dress = av.look.type === 'dress';
@@ -3838,23 +4102,23 @@ body.sheet-open #banner{display:none}
     // 表情（まばたきは専用のコマ。2割は2回続けて）
     let e = av.exprT > 0 ? av.tmpExpr : av.baseExpr;
     if (av.exprT > 0) av.exprT -= dt;
-    if (av.sitT > 0) e = 'sleep';
+    if (av.sitT > 0 && mascot) e = 'sleep';
     const want = e;                                          // まばたきを入れる前の表情（頭の上のエフェクトに使う）
     av.blinkT -= dt;
     if (av.blinkT < 0) {
-      if (e === 'basic' || e === 'think' || e === 'surprise') e = 'blink';
+      if ((!mascot && !['sleep', 'wink', 'excite'].includes(e)) || e === 'basic' || e === 'think' || e === 'surprise') e = 'blink';
       if (av.blinkT < -0.11) av.blinkT = Math.random() < 0.2 ? 0.16 : rand(2.4, 5.5);
     }
     const fm = m.avFaceM;
     if (av.curExpr == null) av.avSwapT = 0;                  // 着せ替え直後はすぐ替える
     if (e !== av.curExpr && !(av.avSwapT > 0)) {
-      if (e === 'blink' || av.curExpr === 'blink' || av.curExpr == null || !fm || reduceMotion) { av.curExpr = e; m.faceMat.map = faceTex(e, av.look.led); }
+      if (!mascot || e === 'blink' || av.curExpr === 'blink' || av.curExpr == null || !fm || reduceMotion) { av.curExpr = e; m.faceMat.map = faceTex(e, av.look.led, !mascot); }
       else { av.avSwapT = AV_SWAP; av.avNext = e; }
     }
     if (fm) {
       if (av.avSwapT > 0) {                                  // 縦につぶし、つぶれきった瞬間に絵を替えて開く
         av.avSwapT -= dt; const f = Math.max(0, av.avSwapT) / AV_SWAP;
-        if (f < 0.5 && av.curExpr !== av.avNext) { av.curExpr = av.avNext; m.faceMat.map = faceTex(av.curExpr, av.look.led); }
+        if (f < 0.5 && av.curExpr !== av.avNext) { av.curExpr = av.avNext; m.faceMat.map = faceTex(av.curExpr, av.look.led, !mascot); }
         const k = 0.12 + 0.88 * Math.abs(2 * f - 1);
         fm.scale.y = m.avFaceSY * k; fm.position.z = m.avFaceZ0 + m.avFaceDZ * (1 - k) / 0.88;
       } else if (fm.scale.y !== m.avFaceSY) { fm.scale.y = m.avFaceSY; fm.position.z = m.avFaceZ0; }
@@ -3884,10 +4148,10 @@ body.sheet-open #banner{display:none}
     if (av.avAir && !air) av.avLandT = 0.2;                  // 着地した瞬間
     av.avAir = air;
     let sy = 1 + sq;
-    sy *= 1 + (!av.moving && !mascot ? Math.sin(time * 2.2 + av.phase) * 0.012 * RM : 0);
-    if (air && av.vy > 0) sy *= 1 + 0.07 * Math.min(1, av.vy / 9) * RM;
-    if (av.avLandT > 0) { av.avLandT -= dt; sy *= 1 - Math.sin(Math.max(0, av.avLandT) / 0.2 * Math.PI) * 0.13 * RM; }
-    sy *= (1 - 0.05 * Math.abs(kick)) * (1 + (0.08 * fHopS + 0.03 * fStr) * RM);
+    sy *= 1 + (!av.moving && !mascot ? Math.sin(time * 1.65 + av.phase) * 0.0035 * RM : 0);
+    if (air && av.vy > 0) sy *= 1 + (mascot ? .07 : .018) * Math.min(1, av.vy / 9) * RM;
+    if (av.avLandT > 0) { av.avLandT -= dt; sy *= 1 - Math.sin(Math.max(0, av.avLandT) / 0.2 * Math.PI) * (mascot ? .13 : .035) * RM; }
+    sy *= (1 - (mascot ? .05 : .012) * Math.abs(kick)) * (1 + (0.08 * fHopS + 0.03 * fStr) * RM);
     const sx = 1 / Math.sqrt(sy);                            // 体積がだいたい変わらないように
     m.pivot.scale.set(sx, sy, sx);
     const s = m.avShadowS * (1 - Math.min(0.5, (av.y + fHop * 0.12 * RM) * 0.12)); m.shadow.scale.set(s, s, 1);
@@ -4576,8 +4840,8 @@ body.sheet-open #banner{display:none}
   window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
   // カメラ：上へドラッグすると、地面すれすれから空とコアを見上げる
-  const CAM_DIST = camera.aspect < 0.8 ? 22 : 20;
-  const cam = { yaw: 0, pitch: -0.1, dist: CAM_DIST, tx: 0, ty: 1.6, tz: 20 };
+  const CAM_DIST = camera.aspect < 0.8 ? 28 : 20;
+  const cam = { yaw: 0, pitch: -0.18, dist: CAM_DIST, tx: 0, ty: 1.6, tz: 20 };
   function updateCamera(dt) {
     const k = 1 - Math.exp(-dt * 8);
     cam.tx += (player.x - cam.tx) * k; cam.tz += (player.z - cam.tz) * k; cam.ty += (player.y * 0.5 + 1.6 - cam.ty) * k;
@@ -5080,7 +5344,8 @@ body.sheet-open #banner{display:none}
     readTheme();
     paintSky(); scene.fog.color.set(T.skyHorizon);
     stars.visible = T.dark;
-    cloudMat.opacity = T.dark ? 0.22 : 0.85; cloudMat.color.set(T.dark ? '#B9A8FF' : '#FFFFFF');
+    objCloudMats.forEach(m => { m.opacity = T.dark ? 0.3 : 0.87; m.color.set(T.dark ? '#8F9ACB' : '#FFFFFF'); });
+    objCirrusMat.opacity = T.dark ? .12 : .65;
     MAT.side.color.set(T.side); MAT.white.color.set(T.dark ? '#E4E0FF' : '#FFFFFF'); MAT.lilac.color.set(T.dark ? '#8F80E0' : '#E2D8FF');
     hemi.color.set(T.dark ? '#9AA6FF' : '#FFFFFF'); hemi.groundColor.set(T.dark ? '#2A2466' : '#D9D0FF');
     hemi.intensity = T.dark ? 0.5 : 0.4; sun.intensity = T.dark ? 0.32 : 0.7;
@@ -5116,7 +5381,7 @@ body.sheet-open #banner{display:none}
     });
     screens.forEach(s => s.m.material.color.setHSL((time * 0.08 + s.o) % 1, 0.75, 0.62));
     beams.forEach((b, k) => { b.rotation.z = Math.sin(time * (reduceMotion ? 0.2 : 0.9) + k * 1.3) * 0.28; });
-    floaters.forEach(f => { f.m.rotation.y += dd * f.sp; f.m.position.y = f.y + Math.sin(time * 0.3 + f.ph) * 2 * bobAmp; });
+    floaters.forEach(f => { f.m.rotation.y += dd * f.sp; f.m.position.y = f.y + Math.sin(time * 0.3 + f.ph) * (f.amp == null ? 2 : f.amp) * bobAmp; });
     clouds.forEach(c => { c.a += dd * c.sp2; c.sp.position.x = Math.cos(c.a) * c.r; c.sp.position.z = Math.sin(c.a) * c.r; });
     core.position.y = CORE_BASE + Math.sin(time * 0.6) * 0.5 * bobAmp;
     coreAnim.fins.rotation.y += dd * 0.18;
@@ -5125,9 +5390,11 @@ body.sheet-open #banner{display:none}
     coreAnim.subs.forEach(s => { s.g.position.y = s.y + Math.sin(time * 1.2 + s.ph) * 0.12 * bobAmp; s.g.rotation.y += dd * 0.6; });
     coreAnim.displays.forEach(d => { d.m.position.y = d.y + Math.sin(time * 1.1 + d.ph) * 0.08 * bobAmp; });
     coreAnim.bits.forEach(b => { b.m.position.y = b.y + Math.sin(time + b.ph) * 0.15 * bobAmp; b.m.rotation.x += dd; b.m.rotation.y += dd; });
+    if (coreAnim.update) coreAnim.update(dd, time, bobAmp);
     crystal.rotation.y += dd * 0.5; crystal.position.y = 4.2 + Math.sin(time * 1.2) * 0.25 * bobAmp;
     if (marker.visible) { marker.scale.setScalar(Math.max(1, marker.scale.x - dt * 2.5)); marker.material.opacity = 0.65 + Math.sin(time * 6) * 0.25; }
     screenT -= dt; if (screenT <= 0) { screenT = 1 / 12; drawStageScreen(time); }
+    objDroneUpdates.forEach(f => f(dt));
     areaUpdates.forEach(f => f(dt));
     updateCamera(dt);
     updateHUD(dt);
